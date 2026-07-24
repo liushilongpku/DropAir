@@ -15,9 +15,16 @@ local Mac development environment.
 4. Download the `DropAir.app.zip` artifact.
 5. Unzip it on macOS and open `DropAir.app`.
 
-Because this smoke build is not notarized, macOS may require right-clicking the
-app and choosing **Open**, or allowing it in **System Settings > Privacy &
-Security**.
+Because this smoke build is ad-hoc signed but not notarized, macOS may still
+quarantine it after download. If macOS says the app is damaged, remove the
+download quarantine attribute:
+
+```sh
+xattr -dr com.apple.quarantine ~/Downloads/DropAir.app
+```
+
+Adjust the path if you unzipped the app somewhere else, then right-click the app
+and choose **Open**.
 
 ## Local Development
 

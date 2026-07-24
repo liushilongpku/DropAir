@@ -30,6 +30,11 @@ jobs:
       - name: Build Tauri macOS app bundle
         run: npm run tauri -- build --bundles app
 
+      - name: Ad-hoc sign macOS app
+        run: |
+          codesign --force --deep --sign - "src-tauri/target/release/bundle/macos/DropAir.app"
+          codesign --verify --deep --strict --verbose=2 "src-tauri/target/release/bundle/macos/DropAir.app"
+
       - name: Zip macOS app bundle
         run: ditto -c -k --sequesterRsrc --keepParent "src-tauri/target/release/bundle/macos/DropAir.app" "DropAir.app.zip"
 
