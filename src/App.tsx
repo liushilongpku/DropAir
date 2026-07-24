@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   CheckCircle2,
   FileArchive,
@@ -39,6 +40,42 @@ function App() {
 
   useEffect(() => {
     void refreshShelf();
+  }, []);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+
+    getCurrentWebview()
+      .onDragDropEvent((event) => {
+        if (event.payload.type === "enter" || event.payload.type === "over") {
+          setIsDragging(true);
+          return;
+        }
+
+        if (event.payload.type === "leave") {
+          setIsDragging(false);
+          return;
+        }
+
+        setIsDragging(false);
+        void addPaths(event.payload.paths);
+      })
+      .then((nextUnlisten) => {
+        if (cancelled) {
+          nextUnlisten();
+        } else {
+          unlisten = nextUnlisten;
+        }
+      })
+      .catch((error) => {
+        setStatus(toErrorMessage(error));
+      });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, []);
 
   async function refreshShelf() {
