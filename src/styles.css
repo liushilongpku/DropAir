@@ -24,6 +24,67 @@ button {
   font: inherit;
 }
 
+.shake-shelf {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 100vh;
+  overflow: hidden;
+  border: 1px solid #a9c8bb;
+  border-radius: 8px;
+  color: #153b32;
+  background: rgba(248, 253, 250, 0.96);
+  box-shadow: 0 12px 30px rgba(20, 58, 46, 0.22);
+}
+
+.shake-shelf.is-dragging {
+  border-color: #147566;
+  background: #e9f7ef;
+}
+
+.shake-shelf-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 36px;
+  padding: 0 12px;
+  border-bottom: 1px solid #dcebe2;
+  color: #477168;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.shake-shelf-empty {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 7px;
+  min-height: 94px;
+  color: #4d756b;
+  font-size: 14px;
+}
+
+.shake-shelf-items {
+  display: grid;
+  align-content: center;
+  gap: 7px;
+  padding: 10px 12px;
+}
+
+.shake-shelf-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: #315d52;
+  font-size: 13px;
+}
+
+.shake-shelf-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .app-shell {
   min-height: 100vh;
   display: grid;

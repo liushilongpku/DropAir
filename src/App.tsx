@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   CheckCircle2,
   FileArchive,
@@ -12,6 +14,8 @@ import {
   X
 } from "lucide-react";
 import { DragEvent, useEffect, useMemo, useState } from "react";
+
+const isShelfWindow = new URLSearchParams(window.location.search).has("shelf");
 
 type ShelfItemKind = "file" | "directory" | "other";
 
@@ -40,6 +44,17 @@ function App() {
 
   useEffect(() => {
     void refreshShelf();
+  }, []);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listen<ShelfItem[]>("shelf-changed", (event) => setItems(event.payload)).then(
+      (nextUnlisten) => {
+        unlisten = nextUnlisten;
+      }
+    );
+
+    return () => unlisten?.();
   }, []);
 
   useEffect(() => {
@@ -102,6 +117,9 @@ function App() {
       const nextItems = await invoke<ShelfItem[]>("add_shelf_paths", { paths });
       setItems(nextItems);
       setStatus(`${paths.length} item${paths.length === 1 ? "" : "s"} added`);
+      if (isShelfWindow) {
+        await getCurrentWindow().hide();
+      }
     } catch (error) {
       setStatus(toErrorMessage(error));
     } finally {
@@ -156,6 +174,37 @@ function App() {
       .filter((path): path is string => Boolean(path));
 
     void addPaths(paths);
+  }
+
+  if (isShelfWindow) {
+    return (
+      <main
+        className={`shake-shelf${isDragging ? " is-dragging" : ""}`}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        <div className="shake-shelf-topline">
+          <span>DropAir Shelf</span>
+          <span>{items.length} queued</span>
+        </div>
+        {items.length === 0 ? (
+          <div className="shake-shelf-empty">
+            <FileArchive size={24} />
+            <strong>Drop files here</strong>
+          </div>
+        ) : (
+          <div className="shake-shelf-items">
+            {items.slice(0, 2).map((item) => (
+              <div className="shake-shelf-item" key={item.id}>
+                {item.kind === "directory" ? <Folder size={16} /> : <FileText size={16} />}
+                <span>{item.name}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </main>
+    );
   }
 
   return (
@@ -227,7 +276,7 @@ function App() {
             <div className="empty-state">
               <FileArchive size={34} />
               <strong>Drop files or folders here</strong>
-              <span>Window drop is active; shake-triggered Shelf comes next.</span>
+              <span>Drag while holding the mouse, then shake left and right to reveal Shelf.</span>
             </div>
           ) : (
             <div className="item-list">

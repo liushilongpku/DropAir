@@ -1,6 +1,10 @@
 use serde::Serialize;
 use std::path::Path;
 use std::sync::Mutex;
+use tauri::Emitter;
+
+#[cfg(target_os = "macos")]
+mod shake_shelf;
 
 #[derive(Default)]
 struct AppState {
@@ -36,6 +40,7 @@ fn list_shelf_items(state: tauri::State<'_, Mutex<AppState>>) -> Result<Vec<Shel
 fn add_shelf_paths(
     paths: Vec<String>,
     state: tauri::State<'_, Mutex<AppState>>,
+    app: tauri::AppHandle,
 ) -> Result<Vec<ShelfItem>, String> {
     let mut state = state.lock().map_err(|_| "failed to lock app state")?;
 
@@ -49,24 +54,37 @@ fn add_shelf_paths(
         state.shelf_items.push(build_shelf_item(id, path));
     }
 
-    Ok(state.shelf_items.clone())
+    let items = state.shelf_items.clone();
+    app.emit("shelf-changed", &items)
+        .map_err(|error| error.to_string())?;
+    Ok(items)
 }
 
 #[tauri::command]
 fn remove_shelf_item(
     id: u64,
     state: tauri::State<'_, Mutex<AppState>>,
+    app: tauri::AppHandle,
 ) -> Result<Vec<ShelfItem>, String> {
     let mut state = state.lock().map_err(|_| "failed to lock app state")?;
     state.shelf_items.retain(|item| item.id != id);
-    Ok(state.shelf_items.clone())
+    let items = state.shelf_items.clone();
+    app.emit("shelf-changed", &items)
+        .map_err(|error| error.to_string())?;
+    Ok(items)
 }
 
 #[tauri::command]
-fn clear_shelf(state: tauri::State<'_, Mutex<AppState>>) -> Result<Vec<ShelfItem>, String> {
+fn clear_shelf(
+    state: tauri::State<'_, Mutex<AppState>>,
+    app: tauri::AppHandle,
+) -> Result<Vec<ShelfItem>, String> {
     let mut state = state.lock().map_err(|_| "failed to lock app state")?;
     state.shelf_items.clear();
-    Ok(state.shelf_items.clone())
+    let items = state.shelf_items.clone();
+    app.emit("shelf-changed", &items)
+        .map_err(|error| error.to_string())?;
+    Ok(items)
 }
 
 fn build_shelf_item(id: u64, path: String) -> ShelfItem {
@@ -107,6 +125,11 @@ fn build_shelf_item(id: u64, path: String) -> ShelfItem {
 pub fn run() {
     tauri::Builder::default()
         .manage(Mutex::new(AppState::default()))
+        .setup(|app| {
+            #[cfg(target_os = "macos")]
+            shake_shelf::setup(app.handle())?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             list_shelf_items,
             add_shelf_paths,

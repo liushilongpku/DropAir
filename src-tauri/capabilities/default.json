@@ -2,6 +2,6 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default capability for the main DropAir window.",
-  "windows": ["main"],
+  "windows": ["main", "shake-shelf"],
   "permissions": ["core:default"]
 }
