@@ -30,7 +30,6 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
     .min_inner_size(300.0, 130.0)
     .resizable(false)
     .decorations(false)
-    .transparent(true)
     .always_on_top(true)
     .skip_taskbar(true)
     .visible(false)
@@ -66,11 +65,13 @@ fn handle_event(app: &AppHandle, state: &Arc<Mutex<DragState>>, event: Event) {
         EventType::ButtonRelease(Button::Left) => state.is_dragging = false,
         EventType::MouseMove { x, y } if state.is_dragging => {
             let now = Instant::now();
-            let started = state.window_started.get_or_insert(now);
-            if now.duration_since(*started).as_millis() > SHAKE_WINDOW_MS {
+            let window_expired = state.window_started.is_none_or(|started| {
+                now.duration_since(started).as_millis() > SHAKE_WINDOW_MS
+            });
+            if window_expired {
                 state.direction_changes = 0;
                 state.direction = 0;
-                *started = now;
+                state.window_started = Some(now);
             }
 
             if let Some(last_x) = state.last_x {
