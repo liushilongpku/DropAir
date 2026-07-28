@@ -4,7 +4,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, LogicalPosition, Manager, WebviewUrl, WebviewWindowBuilder};
 
-const SHAKE_WINDOW_MS: u128 = 700;
+const SHAKE_WINDOW_MS: u128 = 900;
 const MIN_HORIZONTAL_TRAVEL: f64 = 24.0;
 const REQUIRED_DIRECTION_CHANGES: u8 = 3;
 const TRIGGER_COOLDOWN: Duration = Duration::from_secs(2);
@@ -12,11 +12,51 @@ const TRIGGER_COOLDOWN: Duration = Duration::from_secs(2);
 #[derive(Default)]
 struct DragState {
     is_dragging: bool,
-    last_x: Option<f64>,
+    horizontal_extreme_x: Option<f64>,
     direction: i8,
     direction_changes: u8,
     window_started: Option<Instant>,
     last_trigger: Option<Instant>,
+}
+
+impl DragState {
+    fn reset_motion(&mut self, x: Option<f64>) {
+        self.horizontal_extreme_x = x;
+        self.direction = 0;
+        self.direction_changes = 0;
+    }
+
+    fn track_horizontal_motion(&mut self, x: f64) -> bool {
+        let Some(extreme_x) = self.horizontal_extreme_x else {
+            self.horizontal_extreme_x = Some(x);
+            return false;
+        };
+
+        match self.direction {
+            0 => {
+                let travel = x - extreme_x;
+                if travel.abs() >= MIN_HORIZONTAL_TRAVEL {
+                    self.direction = if travel.is_sign_positive() { 1 } else { -1 };
+                    self.horizontal_extreme_x = Some(x);
+                }
+            }
+            1 if x > extreme_x => self.horizontal_extreme_x = Some(x),
+            1 if extreme_x - x >= MIN_HORIZONTAL_TRAVEL => {
+                self.direction = -1;
+                self.direction_changes += 1;
+                self.horizontal_extreme_x = Some(x);
+            }
+            -1 if x < extreme_x => self.horizontal_extreme_x = Some(x),
+            -1 if x - extreme_x >= MIN_HORIZONTAL_TRAVEL => {
+                self.direction = 1;
+                self.direction_changes += 1;
+                self.horizontal_extreme_x = Some(x);
+            }
+            _ => {}
+        }
+
+        self.direction_changes >= REQUIRED_DIRECTION_CHANGES
+    }
 }
 
 pub fn setup(app: &AppHandle) -> tauri::Result<()> {
@@ -57,9 +97,7 @@ fn handle_event(app: &AppHandle, state: &Arc<Mutex<DragState>>, event: Event) {
     match event.event_type {
         EventType::ButtonPress(Button::Left) => {
             state.is_dragging = true;
-            state.last_x = None;
-            state.direction = 0;
-            state.direction_changes = 0;
+            state.reset_motion(None);
             state.window_started = Some(Instant::now());
         }
         EventType::ButtonRelease(Button::Left) => state.is_dragging = false,
@@ -69,33 +107,54 @@ fn handle_event(app: &AppHandle, state: &Arc<Mutex<DragState>>, event: Event) {
                 now.duration_since(started).as_millis() > SHAKE_WINDOW_MS
             });
             if window_expired {
-                state.direction_changes = 0;
-                state.direction = 0;
+                state.reset_motion(Some(x));
                 state.window_started = Some(now);
             }
 
-            if let Some(last_x) = state.last_x {
-                let delta = x - last_x;
-                if delta.abs() >= MIN_HORIZONTAL_TRAVEL {
-                    let direction = if delta.is_sign_positive() { 1 } else { -1 };
-                    if state.direction != 0 && state.direction != direction {
-                        state.direction_changes += 1;
-                    }
-                    state.direction = direction;
-                    if state.direction_changes >= REQUIRED_DIRECTION_CHANGES
-                        && state
-                            .last_trigger
-                            .is_none_or(|last| now.duration_since(last) >= TRIGGER_COOLDOWN)
-                    {
-                        state.last_trigger = Some(now);
-                        state.direction_changes = 0;
-                        show_shelf(app, x, y);
-                    }
-                }
+            if state.track_horizontal_motion(x)
+                && state
+                    .last_trigger
+                    .is_none_or(|last| now.duration_since(last) >= TRIGGER_COOLDOWN)
+            {
+                state.last_trigger = Some(now);
+                state.reset_motion(Some(x));
+                state.window_started = Some(now);
+                show_shelf(app, x, y);
             }
-            state.last_x = Some(x);
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_shake_from_many_small_trackpad_movements() {
+        let mut state = DragState::default();
+        let samples = [
+            0.0, 6.0, 12.0, 18.0, 25.0, 19.0, 13.0, 7.0, 1.0, 7.0, 13.0, 19.0, 25.0,
+            19.0, 13.0, 7.0, 1.0,
+        ];
+
+        let detected = samples
+            .into_iter()
+            .any(|x| state.track_horizontal_motion(x));
+
+        assert!(detected);
+        assert_eq!(state.direction_changes, REQUIRED_DIRECTION_CHANGES);
+    }
+
+    #[test]
+    fn ignores_short_horizontal_jitter() {
+        let mut state = DragState::default();
+        let detected = [0.0, 8.0, -5.0, 10.0, -7.0, 4.0]
+            .into_iter()
+            .any(|x| state.track_horizontal_motion(x));
+
+        assert!(!detected);
+        assert_eq!(state.direction_changes, 0);
     }
 }
 
