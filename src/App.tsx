@@ -9,6 +9,7 @@ import {
   Folder,
   Laptop,
   Loader2,
+  PanelTopOpen,
   Send,
   Trash2,
   X
@@ -36,6 +37,7 @@ function App() {
   const [isDragging, setIsDragging] = useState(false);
   const [status, setStatus] = useState("Ready");
   const [isBusy, setIsBusy] = useState(false);
+  const [shakeStatus, setShakeStatus] = useState("starting");
 
   const totalSize = useMemo(
     () => items.reduce((sum, item) => sum + (item.size ?? 0), 0),
@@ -44,6 +46,24 @@ function App() {
 
   useEffect(() => {
     void refreshShelf();
+  }, []);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    const refreshStatus = () => {
+      void invoke<string>("shake_monitor_status").then(setShakeStatus).catch(() => undefined);
+    };
+    const timer = window.setTimeout(refreshStatus, 500);
+    void listen<string>("shake-monitor-status", (event) => setShakeStatus(event.payload)).then(
+      (nextUnlisten) => {
+        unlisten = nextUnlisten;
+      }
+    );
+
+    return () => {
+      window.clearTimeout(timer);
+      unlisten?.();
+    };
   }, []);
 
   useEffect(() => {
@@ -153,6 +173,15 @@ function App() {
     }
   }
 
+  async function testShakeShelf() {
+    try {
+      await invoke("show_shake_shelf_for_test");
+      setStatus("Test Shelf opened");
+    } catch (error) {
+      setStatus(toErrorMessage(error));
+    }
+  }
+
   function handleDragOver(event: DragEvent<HTMLElement>) {
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
@@ -240,6 +269,10 @@ function App() {
           {isBusy ? <Loader2 className="spin" size={18} /> : <CheckCircle2 size={18} />}
           <span>{status}</span>
         </div>
+        <div className={`monitor-status is-${shakeStatus}`}>
+          <span className="monitor-dot" aria-hidden="true" />
+          <span>{formatShakeStatus(shakeStatus)}</span>
+        </div>
       </aside>
 
       <section className="workspace" aria-label="Shelf workspace">
@@ -249,6 +282,15 @@ function App() {
             <h1>{items.length} item{items.length === 1 ? "" : "s"}</h1>
           </div>
           <div className="toolbar-actions">
+            <button
+              className="icon-button"
+              type="button"
+              onClick={() => void testShakeShelf()}
+              title="Test Shake Shelf"
+              aria-label="Test Shake Shelf"
+            >
+              <PanelTopOpen size={18} />
+            </button>
             <button
               className="icon-button"
               type="button"
@@ -335,6 +377,13 @@ function formatSize(size: number | null) {
 
 function toErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function formatShakeStatus(status: string) {
+  if (status === "listening") return "Shake monitor: Listening";
+  if (status === "permissionRequired") return "Shake monitor: Permission required";
+  if (status === "unsupported") return "Shake monitor: macOS only";
+  return "Shake monitor: Starting";
 }
 
 export default App;

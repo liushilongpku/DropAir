@@ -87,6 +87,24 @@ fn clear_shelf(
     Ok(items)
 }
 
+#[tauri::command]
+fn shake_monitor_status() -> String {
+    #[cfg(target_os = "macos")]
+    return shake_shelf::monitor_status().to_string();
+
+    #[cfg(not(target_os = "macos"))]
+    "unsupported".to_string()
+}
+
+#[tauri::command]
+fn show_shake_shelf_for_test(app: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    return shake_shelf::show_for_test(&app);
+
+    #[cfg(not(target_os = "macos"))]
+    Err("shake shelf is currently available only on macOS".to_string())
+}
+
 fn build_shelf_item(id: u64, path: String) -> ShelfItem {
     let path_ref = Path::new(&path);
     let metadata = std::fs::metadata(path_ref).ok();
@@ -134,7 +152,9 @@ pub fn run() {
             list_shelf_items,
             add_shelf_paths,
             remove_shelf_item,
-            clear_shelf
+            clear_shelf,
+            shake_monitor_status,
+            show_shake_shelf_for_test
         ])
         .run(tauri::generate_context!())
         .expect("error while running DropAir");
