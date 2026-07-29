@@ -159,9 +159,6 @@ function App() {
       const nextItems = await invoke<ShelfItem[]>("add_shelf_paths", { paths });
       setItems(nextItems);
       setStatus(`${paths.length} item${paths.length === 1 ? "" : "s"} added`);
-      if (isShelfWindow) {
-        await invoke("hide_shake_shelf");
-      }
     } catch (error) {
       setStatus(toErrorMessage(error));
     } finally {
