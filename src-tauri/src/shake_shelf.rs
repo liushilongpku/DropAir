@@ -6,7 +6,7 @@ use core_graphics::event::{
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use objc2::MainThreadMarker;
 use objc2_app_kit::{
-    NSApplication, NSScreenSaverWindowLevel, NSView, NSWindow, NSWindowCollectionBehavior,
+    NSApplication, NSStatusWindowLevel, NSView, NSWindow, NSWindowCollectionBehavior,
 };
 use objc2_foundation::{NSRect, NSSize, NSString};
 use serde::Serialize;
@@ -121,6 +121,9 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
 
     let polling_app = app.clone();
     thread::spawn(move || poll_drag_position(polling_app, state));
+
+    let shelf_app = app.clone();
+    thread::spawn(move || keep_shelf_front(shelf_app));
     Ok(())
 }
 
@@ -132,11 +135,31 @@ fn configure_native_window(window: &tauri::WebviewWindow) -> tauri::Result<()> {
 }
 
 fn configure_native_window_handle(native_window: &NSWindow) {
-    let behavior = native_window.collectionBehavior()
-        | NSWindowCollectionBehavior::CanJoinAllSpaces
+    let mut behavior = native_window.collectionBehavior();
+    behavior &= !NSWindowCollectionBehavior::MoveToActiveSpace;
+    behavior &= !NSWindowCollectionBehavior::Managed;
+    behavior &= !NSWindowCollectionBehavior::Transient;
+    behavior &= !NSWindowCollectionBehavior::FullScreenPrimary;
+    behavior &= !NSWindowCollectionBehavior::FullScreenNone;
+    behavior |= NSWindowCollectionBehavior::CanJoinAllSpaces
+        | NSWindowCollectionBehavior::Stationary
+        | NSWindowCollectionBehavior::IgnoresCycle
         | NSWindowCollectionBehavior::FullScreenAuxiliary;
     native_window.setCollectionBehavior(behavior);
-    native_window.setLevel(NSScreenSaverWindowLevel - 1);
+    native_window.setCanHide(false);
+    native_window.setHidesOnDeactivate(false);
+    native_window.setLevel(NSStatusWindowLevel);
+}
+
+fn keep_shelf_front(app: AppHandle) {
+    loop {
+        if let Some(window) = app.get_webview_window("shake-shelf") {
+            if window.is_visible().unwrap_or(false) {
+                let _ = bring_to_front(&window);
+            }
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
 }
 
 fn watch_drag_events(app: AppHandle, state: Arc<Mutex<DragState>>) {
@@ -401,7 +424,10 @@ fn show_shelf(app: &AppHandle, x: f64, y: f64) {
 
 fn show_window(window: &tauri::WebviewWindow) -> Result<(), String> {
     window.show().map_err(|error| error.to_string())?;
+    bring_to_front(window)
+}
 
+fn bring_to_front(window: &tauri::WebviewWindow) -> Result<(), String> {
     let callback_window = window.clone();
     window
         .run_on_main_thread(move || {
