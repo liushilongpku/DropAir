@@ -1,10 +1,18 @@
 use serde::Serialize;
 use std::path::Path;
 use std::sync::Mutex;
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager};
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
 #[cfg(target_os = "macos")]
 mod shake_shelf;
+
+const AUTOSTART_ARG: &str = "--autostart";
+const TRAY_OPEN: &str = "open";
+const TRAY_SHOW_SHELF: &str = "show-shelf";
+const TRAY_QUIT: &str = "quit";
 
 #[derive(Default)]
 struct AppState {
@@ -85,6 +93,24 @@ fn clear_shelf(
     app.emit("shelf-changed", &items)
         .map_err(|error| error.to_string())?;
     Ok(items)
+}
+
+#[tauri::command]
+fn autostart_enabled(app: tauri::AppHandle) -> Result<bool, String> {
+    app.autolaunch()
+        .is_enabled()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn set_autostart(enabled: bool, app: tauri::AppHandle) -> Result<bool, String> {
+    let autostart = app.autolaunch();
+    if enabled {
+        autostart.enable().map_err(|error| error.to_string())?;
+    } else {
+        autostart.disable().map_err(|error| error.to_string())?;
+    }
+    autostart.is_enabled().map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -189,13 +215,59 @@ fn build_shelf_item(id: u64, path: String) -> ShelfItem {
     }
 }
 
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
+    let open = MenuItem::with_id(app, TRAY_OPEN, "Open DropAir", true, None::<&str>)?;
+    let show_shelf = MenuItem::with_id(app, TRAY_SHOW_SHELF, "Show Shelf", true, None::<&str>)?;
+    let separator = PredefinedMenuItem::separator(app)?;
+    let quit = MenuItem::with_id(app, TRAY_QUIT, "Quit DropAir", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open, &show_shelf, &separator, &quit])?;
+
+    let mut tray = TrayIconBuilder::with_id("dropair-tray")
+        .tooltip("DropAir")
+        .menu(&menu)
+        .show_menu_on_left_click(true)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            TRAY_OPEN => show_main_window(app),
+            TRAY_SHOW_SHELF => {
+                #[cfg(target_os = "macos")]
+                let _ = shake_shelf::show_for_test(app);
+            }
+            TRAY_QUIT => app.exit(0),
+            _ => {}
+        });
+    if let Some(icon) = app.default_window_icon() {
+        tray = tray.icon(icon.clone()).icon_as_template(true);
+    }
+    tray.build(app)?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let launched_from_autostart = std::env::args().any(|arg| arg == AUTOSTART_ARG);
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if !args.iter().any(|arg| arg == AUTOSTART_ARG) {
+                show_main_window(app);
+            }
+        }))
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            Some(vec![AUTOSTART_ARG]),
+        ))
         .manage(Mutex::new(AppState::default()))
         .setup(|app| {
             #[cfg(target_os = "macos")]
             shake_shelf::setup(app.handle())?;
+            setup_tray(app.handle())?;
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -212,6 +284,8 @@ pub fn run() {
             add_shelf_paths,
             remove_shelf_item,
             clear_shelf,
+            autostart_enabled,
+            set_autostart,
             shake_monitor_status,
             shake_monitor_diagnostics,
             show_shake_shelf_for_test,
@@ -222,13 +296,14 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building DropAir");
 
-    app.run(|app, event| {
+    app.run(move |app, event| {
+        if matches!(event, tauri::RunEvent::Ready) && !launched_from_autostart {
+            show_main_window(app);
+        }
+
         #[cfg(target_os = "macos")]
         if let tauri::RunEvent::Reopen { .. } = event {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            show_main_window(app);
         }
     });
 }

@@ -495,6 +495,79 @@ h1 {
   border-left: 1px solid #d9e0da;
 }
 
+.settings-workspace {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.settings-list {
+  border-top: 1px solid #d9e0da;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  min-height: 76px;
+  padding: 14px 2px;
+  border-bottom: 1px solid #d9e0da;
+}
+
+.setting-copy {
+  min-width: 0;
+}
+
+.setting-copy strong,
+.setting-copy span {
+  display: block;
+}
+
+.setting-copy strong {
+  font-size: 14px;
+}
+
+.setting-copy span {
+  margin-top: 4px;
+  color: #64736e;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.toggle-control {
+  position: relative;
+  width: 42px;
+  height: 24px;
+  flex: 0 0 42px;
+  padding: 2px;
+  border: 0;
+  border-radius: 12px;
+  background: #a9b4af;
+  transition: background 120ms ease;
+}
+
+.toggle-control span {
+  display: block;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(20, 35, 29, 0.28);
+  transition: transform 120ms ease;
+}
+
+.toggle-control.is-on {
+  background: #147566;
+}
+
+.toggle-control.is-on span {
+  transform: translateX(18px);
+}
+
+.toggle-control:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);

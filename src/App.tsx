@@ -9,6 +9,7 @@ import {
   Laptop,
   Loader2,
   PanelTopOpen,
+  Settings2,
   Send,
   Trash2,
   X
@@ -42,6 +43,8 @@ type ShakeDiagnostics = {
   triggers: number;
 };
 
+type MainView = "shelf" | "settings";
+
 function App() {
   const [items, setItems] = useState<ShelfItem[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -49,6 +52,9 @@ function App() {
   const [isBusy, setIsBusy] = useState(false);
   const [shakeStatus, setShakeStatus] = useState("starting");
   const [shakeDiagnostics, setShakeDiagnostics] = useState<ShakeDiagnostics | null>(null);
+  const [mainView, setMainView] = useState<MainView>("shelf");
+  const [launchAtLogin, setLaunchAtLogin] = useState(false);
+  const [settingsReady, setSettingsReady] = useState(false);
 
   const totalSize = useMemo(
     () => items.reduce((sum, item) => sum + (item.size ?? 0), 0),
@@ -57,6 +63,14 @@ function App() {
 
   useEffect(() => {
     void refreshShelf();
+  }, []);
+
+  useEffect(() => {
+    if (isShelfWindow) return;
+    void invoke<boolean>("autostart_enabled")
+      .then(setLaunchAtLogin)
+      .catch((error) => setStatus(toErrorMessage(error)))
+      .finally(() => setSettingsReady(true));
   }, []);
 
   useEffect(() => {
@@ -185,6 +199,21 @@ function App() {
       const nextItems = await invoke<ShelfItem[]>("clear_shelf");
       setItems(nextItems);
       setStatus("Shelf cleared");
+    } catch (error) {
+      setStatus(toErrorMessage(error));
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function toggleAutostart() {
+    setIsBusy(true);
+    try {
+      const enabled = await invoke<boolean>("set_autostart", {
+        enabled: !launchAtLogin
+      });
+      setLaunchAtLogin(enabled);
+      setStatus(enabled ? "Launch at login enabled" : "Launch at login disabled");
     } catch (error) {
       setStatus(toErrorMessage(error));
     } finally {
@@ -325,13 +354,25 @@ function App() {
         </div>
 
         <nav className="nav-list" aria-label="Primary">
-          <button className="nav-item is-active" type="button">
+          <button
+            className={`nav-item${mainView === "shelf" ? " is-active" : ""}`}
+            type="button"
+            onClick={() => setMainView("shelf")}
+          >
             <FileArchive size={18} />
             Shelf
           </button>
           <button className="nav-item" type="button" disabled>
             <Laptop size={18} />
             Devices
+          </button>
+          <button
+            className={`nav-item${mainView === "settings" ? " is-active" : ""}`}
+            type="button"
+            onClick={() => setMainView("settings")}
+          >
+            <Settings2 size={18} />
+            Settings
           </button>
         </nav>
 
@@ -351,6 +392,7 @@ function App() {
         )}
       </aside>
 
+      {mainView === "shelf" ? (
       <section className="workspace" aria-label="Shelf workspace">
         <header className="toolbar">
           <div>
@@ -432,6 +474,36 @@ function App() {
           <span>Direct transfer pending</span>
         </footer>
       </section>
+      ) : (
+        <section className="workspace settings-workspace" aria-label="Settings">
+          <header className="toolbar">
+            <div>
+              <p className="eyebrow">Application</p>
+              <h1>Settings</h1>
+            </div>
+          </header>
+
+          <div className="settings-list">
+            <div className="setting-row">
+              <div className="setting-copy">
+                <strong>Launch at login</strong>
+                <span>Start DropAir in the background when you sign in.</span>
+              </div>
+              <button
+                className={`toggle-control${launchAtLogin ? " is-on" : ""}`}
+                type="button"
+                role="switch"
+                aria-checked={launchAtLogin}
+                aria-label="Launch at login"
+                disabled={!settingsReady || isBusy}
+                onClick={() => void toggleAutostart()}
+              >
+                <span />
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
     </main>
   );
 }
