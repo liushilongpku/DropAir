@@ -122,6 +122,30 @@ fn show_shake_shelf_for_test(app: tauri::AppHandle) -> Result<(), String> {
     Err("shake shelf is currently available only on macOS".to_string())
 }
 
+#[tauri::command]
+fn hide_shake_shelf(app: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    return shake_shelf::hide(&app);
+
+    #[cfg(not(target_os = "macos"))]
+    Err("shake shelf is currently available only on macOS".to_string())
+}
+
+#[tauri::command]
+async fn begin_native_file_drag(path: String, app: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        return tauri::async_runtime::spawn_blocking(move || {
+            shake_shelf::begin_file_drag(&app, path)
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    Err("native file drag is currently available only on macOS".to_string())
+}
+
 fn build_shelf_item(id: u64, path: String) -> ShelfItem {
     let path_ref = Path::new(&path);
     let metadata = std::fs::metadata(path_ref).ok();
@@ -172,7 +196,9 @@ pub fn run() {
             clear_shelf,
             shake_monitor_status,
             shake_monitor_diagnostics,
-            show_shake_shelf_for_test
+            show_shake_shelf_for_test,
+            hide_shake_shelf,
+            begin_native_file_drag
         ])
         .run(tauri::generate_context!())
         .expect("error while running DropAir");

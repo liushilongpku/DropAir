@@ -4,8 +4,13 @@ use core_graphics::event::{
     CGMouseButton, CallbackResult,
 };
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+use objc2::MainThreadMarker;
+use objc2_app_kit::{NSApplication, NSView};
+use objc2_foundation::{NSRect, NSSize, NSString};
 use serde::Serialize;
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -101,6 +106,7 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
     .resizable(false)
     .decorations(false)
     .always_on_top(true)
+    .visible_on_all_workspaces(true)
     .skip_taskbar(true)
     .visible(false)
     .build()?;
@@ -268,6 +274,56 @@ pub fn show_for_test(app: &AppHandle) -> Result<(), String> {
     window.show().map_err(|error| error.to_string())
 }
 
+pub fn hide(app: &AppHandle) -> Result<(), String> {
+    app.get_webview_window("shake-shelf")
+        .ok_or_else(|| "shake shelf window is unavailable".to_string())?
+        .hide()
+        .map_err(|error| error.to_string())
+}
+
+pub fn begin_file_drag(app: &AppHandle, path: String) -> Result<(), String> {
+    if !Path::new(&path).is_file() {
+        return Err("only existing files can be dragged out".to_string());
+    }
+
+    let window = app
+        .get_webview_window("shake-shelf")
+        .ok_or_else(|| "shake shelf window is unavailable".to_string())?;
+    let callback_window = window.clone();
+    let (sender, receiver) = mpsc::sync_channel(1);
+
+    window
+        .run_on_main_thread(move || {
+            let result = begin_file_drag_on_main_thread(&callback_window, &path);
+            let _ = sender.send(result);
+        })
+        .map_err(|error| error.to_string())?;
+
+    receiver
+        .recv()
+        .map_err(|_| "native file drag ended unexpectedly".to_string())?
+}
+
+fn begin_file_drag_on_main_thread(window: &tauri::WebviewWindow, path: &str) -> Result<(), String> {
+    let marker =
+        MainThreadMarker::new().ok_or_else(|| "not on the macOS main thread".to_string())?;
+    let event = NSApplication::sharedApplication(marker)
+        .currentEvent()
+        .ok_or_else(|| "no active mouse event was found".to_string())?;
+    let view_ptr = window.ns_view().map_err(|error| error.to_string())?;
+    let view = unsafe { &*(view_ptr.cast::<NSView>()) };
+    let filename = NSString::from_str(path);
+    let source_rect = NSRect::new(event.locationInWindow(), NSSize::new(32.0, 32.0));
+
+    #[allow(deprecated)]
+    let started = view.dragFile_fromRect_slideBack_event(&filename, source_rect, true, &event);
+    if started {
+        Ok(())
+    } else {
+        Err("macOS did not start the file drag".to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -303,6 +359,8 @@ mod tests {
 fn show_shelf(app: &AppHandle, x: f64, y: f64) {
     if let Some(window) = app.get_webview_window("shake-shelf") {
         let _ = window.set_position(LogicalPosition::new(x - 180.0, y + 24.0));
+        let _ = window.set_always_on_top(true);
+        let _ = window.set_visible_on_all_workspaces(true);
         let _ = window.show();
     }
 }
