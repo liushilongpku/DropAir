@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   CheckCircle2,
+  ExternalLink,
   FileArchive,
   FileText,
   Folder,
@@ -11,6 +12,7 @@ import {
   PanelTopOpen,
   Settings2,
   Send,
+  ShieldCheck,
   Trash2,
   X
 } from "lucide-react";
@@ -43,6 +45,11 @@ type ShakeDiagnostics = {
   triggers: number;
 };
 
+type AppSettings = {
+  shakeEnabled: boolean;
+  shakeSensitivity: number;
+};
+
 type MainView = "shelf" | "settings";
 
 function App() {
@@ -54,6 +61,9 @@ function App() {
   const [shakeDiagnostics, setShakeDiagnostics] = useState<ShakeDiagnostics | null>(null);
   const [mainView, setMainView] = useState<MainView>("shelf");
   const [launchAtLogin, setLaunchAtLogin] = useState(false);
+  const [shakeEnabled, setShakeEnabledState] = useState(true);
+  const [shakeSensitivity, setShakeSensitivityState] = useState(3);
+  const [accessibilityAllowed, setAccessibilityAllowed] = useState<boolean | null>(null);
   const [settingsReady, setSettingsReady] = useState(false);
 
   const totalSize = useMemo(
@@ -67,10 +77,35 @@ function App() {
 
   useEffect(() => {
     if (isShelfWindow) return;
-    void invoke<boolean>("autostart_enabled")
-      .then(setLaunchAtLogin)
-      .catch((error) => setStatus(toErrorMessage(error)))
-      .finally(() => setSettingsReady(true));
+    const loadSettings = async () => {
+      try {
+        const [autostart, appSettings, accessibility] = await Promise.all([
+          invoke<boolean>("autostart_enabled"),
+          invoke<AppSettings>("app_settings"),
+          invoke<boolean>("accessibility_permission_status")
+        ]);
+        setLaunchAtLogin(autostart);
+        setShakeEnabledState(appSettings.shakeEnabled);
+        setShakeSensitivityState(appSettings.shakeSensitivity);
+        setAccessibilityAllowed(accessibility);
+      } catch (error) {
+        setStatus(toErrorMessage(error));
+      } finally {
+        setSettingsReady(true);
+      }
+    };
+    void loadSettings();
+  }, []);
+
+  useEffect(() => {
+    if (isShelfWindow) return;
+    const refreshAccessibility = () => {
+      void invoke<boolean>("accessibility_permission_status")
+        .then(setAccessibilityAllowed)
+        .catch(() => undefined);
+    };
+    window.addEventListener("focus", refreshAccessibility);
+    return () => window.removeEventListener("focus", refreshAccessibility);
   }, []);
 
   useEffect(() => {
@@ -218,6 +253,49 @@ function App() {
       setStatus(toErrorMessage(error));
     } finally {
       setIsBusy(false);
+    }
+  }
+
+  async function updateShakeEnabled() {
+    setIsBusy(true);
+    try {
+      const settings = await invoke<AppSettings>("set_shake_enabled", {
+        enabled: !shakeEnabled
+      });
+      setShakeEnabledState(settings.shakeEnabled);
+      setShakeSensitivityState(settings.shakeSensitivity);
+      const monitorStatus = await invoke<string>("shake_monitor_status");
+      setShakeStatus(monitorStatus);
+      setStatus(settings.shakeEnabled ? "Shake detection enabled" : "Shake detection disabled");
+    } catch (error) {
+      setStatus(toErrorMessage(error));
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function updateShakeSensitivity(sensitivity: number) {
+    setShakeSensitivityState(sensitivity);
+    try {
+      const settings = await invoke<AppSettings>("set_shake_sensitivity", { sensitivity });
+      setShakeSensitivityState(settings.shakeSensitivity);
+      setStatus(`Shake sensitivity set to ${settings.shakeSensitivity}`);
+    } catch (error) {
+      setStatus(toErrorMessage(error));
+    }
+  }
+
+  async function openAccessibilitySettings() {
+    try {
+      await invoke("open_accessibility_settings");
+      setStatus("Accessibility settings opened");
+      window.setTimeout(() => {
+        void invoke<boolean>("accessibility_permission_status")
+          .then(setAccessibilityAllowed)
+          .catch(() => undefined);
+      }, 1000);
+    } catch (error) {
+      setStatus(toErrorMessage(error));
     }
   }
 
@@ -490,6 +568,46 @@ function App() {
           <div className="settings-list">
             <div className="setting-row">
               <div className="setting-copy">
+                <strong>Shake detection</strong>
+                <span>Reveal Shelf when a dragged item is shaken left and right.</span>
+              </div>
+              <button
+                className={`toggle-control${shakeEnabled ? " is-on" : ""}`}
+                type="button"
+                role="switch"
+                aria-checked={shakeEnabled}
+                aria-label="Shake detection"
+                disabled={!settingsReady || isBusy}
+                onClick={() => void updateShakeEnabled()}
+              >
+                <span />
+              </button>
+            </div>
+
+            <div className="setting-row">
+              <div className="setting-copy">
+                <strong>Shake sensitivity</strong>
+                <span>Higher values require less horizontal movement.</span>
+              </div>
+              <div className={`sensitivity-control${shakeEnabled ? "" : " is-disabled"}`}>
+                <span>Low</span>
+                <input
+                  type="range"
+                  min="1"
+                  max="5"
+                  step="1"
+                  value={shakeSensitivity}
+                  aria-label="Shake sensitivity"
+                  disabled={!settingsReady || !shakeEnabled}
+                  onChange={(event) => void updateShakeSensitivity(Number(event.target.value))}
+                />
+                <output>{shakeSensitivity}</output>
+                <span>High</span>
+              </div>
+            </div>
+
+            <div className="setting-row">
+              <div className="setting-copy">
                 <strong>Launch at login</strong>
                 <span>Start DropAir in the background when you sign in.</span>
               </div>
@@ -504,6 +622,34 @@ function App() {
               >
                 <span />
               </button>
+            </div>
+
+            <div className="setting-row">
+              <div className="setting-copy permission-copy">
+                <strong>
+                  <ShieldCheck size={16} />
+                  Accessibility permission
+                </strong>
+                <span>Required by macOS for reliable global drag monitoring.</span>
+              </div>
+              <div className="permission-actions">
+                <span className={`permission-status${accessibilityAllowed ? " is-allowed" : ""}`}>
+                  {accessibilityAllowed === null
+                    ? "Checking"
+                    : accessibilityAllowed
+                      ? "Allowed"
+                      : "Not allowed"}
+                </span>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={!settingsReady}
+                  onClick={() => void openAccessibilitySettings()}
+                >
+                  <ExternalLink size={16} />
+                  Open System Settings
+                </button>
+              </div>
             </div>
           </div>
         </section>
@@ -532,6 +678,7 @@ function toErrorMessage(error: unknown) {
 }
 
 function formatShakeStatus(status: string) {
+  if (status === "disabled") return "Shake monitor: Disabled";
   if (status === "listening") return "Shake monitor: Listening";
   if (status === "permissionRequired") return "Shake monitor: Permission required";
   if (status === "unsupported") return "Shake monitor: macOS only";

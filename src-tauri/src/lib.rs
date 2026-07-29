@@ -6,8 +6,12 @@ use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
+mod settings;
+
 #[cfg(target_os = "macos")]
 mod shake_shelf;
+
+use settings::{AppSettings, SettingsStore};
 
 const AUTOSTART_ARG: &str = "--autostart";
 const TRAY_OPEN: &str = "open";
@@ -111,6 +115,71 @@ fn set_autostart(enabled: bool, app: tauri::AppHandle) -> Result<bool, String> {
         autostart.disable().map_err(|error| error.to_string())?;
     }
     autostart.is_enabled().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn app_settings(state: tauri::State<'_, Mutex<SettingsStore>>) -> Result<AppSettings, String> {
+    let state = state.lock().map_err(|_| "failed to lock settings")?;
+    Ok(state.settings())
+}
+
+#[tauri::command]
+fn set_shake_enabled(
+    enabled: bool,
+    state: tauri::State<'_, Mutex<SettingsStore>>,
+    app: tauri::AppHandle,
+) -> Result<AppSettings, String> {
+    let settings = state
+        .lock()
+        .map_err(|_| "failed to lock settings")?
+        .set_shake_enabled(enabled)?;
+    #[cfg(target_os = "macos")]
+    shake_shelf::set_enabled(&app, settings.shake_enabled);
+    Ok(settings)
+}
+
+#[tauri::command]
+fn set_shake_sensitivity(
+    sensitivity: u8,
+    state: tauri::State<'_, Mutex<SettingsStore>>,
+) -> Result<AppSettings, String> {
+    let settings = state
+        .lock()
+        .map_err(|_| "failed to lock settings")?
+        .set_shake_sensitivity(sensitivity)?;
+    #[cfg(target_os = "macos")]
+    shake_shelf::set_sensitivity(settings.shake_sensitivity);
+    Ok(settings)
+}
+
+#[tauri::command]
+fn accessibility_permission_status() -> bool {
+    #[cfg(target_os = "macos")]
+    return unsafe { AXIsProcessTrusted() };
+
+    #[cfg(not(target_os = "macos"))]
+    false
+}
+
+#[tauri::command]
+fn open_accessibility_settings() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+            .spawn()
+            .map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    Err("accessibility settings are available only on macOS".to_string())
+}
+
+#[cfg(target_os = "macos")]
+#[link(name = "ApplicationServices", kind = "framework")]
+extern "C" {
+    fn AXIsProcessTrusted() -> bool;
 }
 
 #[tauri::command]
@@ -259,8 +328,12 @@ pub fn run() {
         ))
         .manage(Mutex::new(AppState::default()))
         .setup(|app| {
+            let settings_store =
+                SettingsStore::load(app.handle()).map_err(std::io::Error::other)?;
+            let settings = settings_store.settings();
+            app.manage(Mutex::new(settings_store));
             #[cfg(target_os = "macos")]
-            shake_shelf::setup(app.handle())?;
+            shake_shelf::setup(app.handle(), &settings)?;
             setup_tray(app.handle())?;
             Ok(())
         })
@@ -280,6 +353,11 @@ pub fn run() {
             clear_shelf,
             autostart_enabled,
             set_autostart,
+            app_settings,
+            set_shake_enabled,
+            set_shake_sensitivity,
+            accessibility_permission_status,
+            open_accessibility_settings,
             shake_monitor_status,
             shake_monitor_diagnostics,
             show_shake_shelf_for_test,

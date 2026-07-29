@@ -292,6 +292,10 @@ button {
   background: #16806f;
 }
 
+.monitor-status.is-disabled .monitor-dot {
+  background: #7b8984;
+}
+
 .monitor-status.is-permissionRequired {
   color: #8a4b20;
 }
@@ -568,6 +572,85 @@ h1 {
   opacity: 0.5;
 }
 
+.sensitivity-control,
+.permission-actions,
+.secondary-button,
+.permission-copy strong {
+  display: flex;
+  align-items: center;
+}
+
+.sensitivity-control {
+  width: 270px;
+  min-height: 32px;
+  flex: 0 0 270px;
+  gap: 9px;
+  color: #64736e;
+  font-size: 11px;
+}
+
+.sensitivity-control.is-disabled {
+  opacity: 0.5;
+}
+
+.sensitivity-control input {
+  width: 132px;
+  accent-color: #147566;
+}
+
+.sensitivity-control output {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  border: 1px solid #d5ddd6;
+  border-radius: 6px;
+  color: #29433c;
+  background: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.permission-copy strong {
+  gap: 7px;
+}
+
+.permission-actions {
+  flex: 0 0 auto;
+  gap: 12px;
+}
+
+.permission-status {
+  min-width: 72px;
+  color: #8a4b20;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.permission-status.is-allowed {
+  color: #147566;
+}
+
+.secondary-button {
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid #cbd6cf;
+  border-radius: 8px;
+  color: #29433c;
+  background: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -601,6 +684,26 @@ h1 {
 
   .item-meta {
     grid-column: 2;
+    justify-content: space-between;
+  }
+
+  .setting-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .sensitivity-control {
+    width: 100%;
+    flex-basis: auto;
+  }
+
+  .sensitivity-control input {
+    flex: 1 1 auto;
+  }
+
+  .permission-actions {
+    width: 100%;
     justify-content: space-between;
   }
 }

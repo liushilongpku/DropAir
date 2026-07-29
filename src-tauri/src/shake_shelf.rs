@@ -1,3 +1,4 @@
+use crate::settings::{AppSettings, SettingsStore, ShelfFrame};
 use core_foundation::runloop::CFRunLoop;
 use core_graphics::event::{
     CGEvent, CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement, CGEventType,
@@ -13,15 +14,16 @@ use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 use serde::Serialize;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 const SHAKE_WINDOW_MS: u128 = 1500;
-const MIN_HORIZONTAL_TRAVEL: f64 = 24.0;
-const REQUIRED_DIRECTION_CHANGES: u8 = 3;
 const TRIGGER_COOLDOWN: Duration = Duration::from_secs(2);
+const FRAME_SAVE_DELAY: Duration = Duration::from_millis(500);
+const MIN_SHELF_WIDTH: f64 = 150.0;
+const MIN_SHELF_HEIGHT: f64 = 130.0;
 const MONITOR_STARTING: u8 = 0;
 const MONITOR_LISTENING: u8 = 1;
 const MONITOR_PERMISSION_REQUIRED: u8 = 2;
@@ -33,6 +35,9 @@ static MAX_DIRECTION_CHANGES: AtomicU8 = AtomicU8::new(0);
 static TRIGGERS: AtomicU64 = AtomicU64::new(0);
 static SHELF_PANEL: AtomicUsize = AtomicUsize::new(0);
 static SHELF_VISIBLE: AtomicBool = AtomicBool::new(false);
+static SHAKE_ENABLED: AtomicBool = AtomicBool::new(true);
+static SHAKE_SENSITIVITY: AtomicU8 = AtomicU8::new(3);
+static SHELF_FRAME_TRACKER: OnceLock<Mutex<FrameTracker>> = OnceLock::new();
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -58,11 +63,16 @@ struct DragState {
     last_trigger: Option<Instant>,
 }
 
+struct FrameTracker {
+    observed: Option<ShelfFrame>,
+    observed_since: Instant,
+    persisted: Option<ShelfFrame>,
+}
+
 #[derive(Clone, Copy)]
 enum PanelPlacement {
     Keep,
     Pointer,
-    Center,
 }
 
 impl DragState {
@@ -72,7 +82,12 @@ impl DragState {
         self.direction_changes = 0;
     }
 
-    fn track_horizontal_motion(&mut self, x: f64) -> bool {
+    fn track_horizontal_motion(
+        &mut self,
+        x: f64,
+        min_horizontal_travel: f64,
+        required_direction_changes: u8,
+    ) -> bool {
         let Some(extreme_x) = self.horizontal_extreme_x else {
             self.horizontal_extreme_x = Some(x);
             return false;
@@ -81,19 +96,19 @@ impl DragState {
         match self.direction {
             0 => {
                 let travel = x - extreme_x;
-                if travel.abs() >= MIN_HORIZONTAL_TRAVEL {
+                if travel.abs() >= min_horizontal_travel {
                     self.direction = if travel.is_sign_positive() { 1 } else { -1 };
                     self.horizontal_extreme_x = Some(x);
                 }
             }
             1 if x > extreme_x => self.horizontal_extreme_x = Some(x),
-            1 if extreme_x - x >= MIN_HORIZONTAL_TRAVEL => {
+            1 if extreme_x - x >= min_horizontal_travel => {
                 self.direction = -1;
                 self.direction_changes += 1;
                 self.horizontal_extreme_x = Some(x);
             }
             -1 if x < extreme_x => self.horizontal_extreme_x = Some(x),
-            -1 if x - extreme_x >= MIN_HORIZONTAL_TRAVEL => {
+            -1 if x - extreme_x >= min_horizontal_travel => {
                 self.direction = 1;
                 self.direction_changes += 1;
                 self.horizontal_extreme_x = Some(x);
@@ -101,19 +116,26 @@ impl DragState {
             _ => {}
         }
 
-        self.direction_changes >= REQUIRED_DIRECTION_CHANGES
+        self.direction_changes >= required_direction_changes
     }
 }
 
-pub fn setup(app: &AppHandle) -> tauri::Result<()> {
+pub fn setup(app: &AppHandle, settings: &AppSettings) -> tauri::Result<()> {
+    SHAKE_ENABLED.store(settings.shake_enabled, Ordering::Relaxed);
+    SHAKE_SENSITIVITY.store(settings.shake_sensitivity, Ordering::Relaxed);
+    let _ = SHELF_FRAME_TRACKER.set(Mutex::new(FrameTracker {
+        observed: settings.shelf_frame,
+        observed_since: Instant::now(),
+        persisted: settings.shelf_frame,
+    }));
     let window = WebviewWindowBuilder::new(
         app,
         "shake-shelf",
         WebviewUrl::App("index.html?shelf=1".into()),
     )
     .title("DropAir Shelf")
-    .inner_size(150.0, 130.0)
-    .min_inner_size(150.0, 130.0)
+    .inner_size(MIN_SHELF_WIDTH, MIN_SHELF_HEIGHT)
+    .min_inner_size(MIN_SHELF_WIDTH, MIN_SHELF_HEIGHT)
     .resizable(true)
     .decorations(false)
     .always_on_top(true)
@@ -121,7 +143,7 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
     .skip_taskbar(true)
     .visible(false)
     .build()?;
-    create_shelf_panel(&window)?;
+    create_shelf_panel(&window, settings.shelf_frame)?;
 
     let state = Arc::new(Mutex::new(DragState::default()));
     let event_app = app.clone();
@@ -136,7 +158,10 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-fn create_shelf_panel(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+fn create_shelf_panel(
+    window: &tauri::WebviewWindow,
+    restored_frame: Option<ShelfFrame>,
+) -> tauri::Result<()> {
     let marker = MainThreadMarker::new().expect("shelf setup must run on the macOS main thread");
     let source_ptr = window.ns_window()?;
     let source_window = unsafe { &*(source_ptr.cast::<NSWindow>()) };
@@ -145,7 +170,23 @@ fn create_shelf_panel(window: &tauri::WebviewWindow) -> tauri::Result<()> {
         .expect("Tauri shelf window must have a content view");
     source_window.setContentView(None);
 
-    let content_rect = NSRect::new(source_window.frame().origin, NSSize::new(150.0, 130.0));
+    let content_rect = restored_frame
+        .filter(|frame| frame.is_valid())
+        .map(|frame| {
+            NSRect::new(
+                NSPoint::new(frame.x, frame.y),
+                NSSize::new(
+                    frame.width.max(MIN_SHELF_WIDTH),
+                    frame.height.max(MIN_SHELF_HEIGHT),
+                ),
+            )
+        })
+        .unwrap_or_else(|| {
+            NSRect::new(
+                source_window.frame().origin,
+                NSSize::new(MIN_SHELF_WIDTH, MIN_SHELF_HEIGHT),
+            )
+        });
     let style = NSWindowStyleMask::Resizable | NSWindowStyleMask::NonactivatingPanel;
     let panel = NSPanel::initWithContentRect_styleMask_backing_defer(
         NSPanel::alloc(marker),
@@ -155,7 +196,7 @@ fn create_shelf_panel(window: &tauri::WebviewWindow) -> tauri::Result<()> {
         false,
     );
     panel.setContentView(Some(&content_view));
-    panel.setContentMinSize(NSSize::new(150.0, 130.0));
+    panel.setContentMinSize(NSSize::new(MIN_SHELF_WIDTH, MIN_SHELF_HEIGHT));
     panel.setFloatingPanel(true);
     panel.setBecomesKeyOnlyIfNeeded(true);
     unsafe { panel.setReleasedWhenClosed(false) };
@@ -197,6 +238,12 @@ fn keep_shelf_front(app: AppHandle) {
         if SHELF_VISIBLE.load(Ordering::Acquire) {
             if let Some(window) = app.get_webview_window("shake-shelf") {
                 let _ = bring_to_front(&window, PanelPlacement::Keep);
+                let frame_app = app.clone();
+                let _ = window.run_on_main_thread(move || {
+                    if let Ok(panel) = shelf_panel() {
+                        observe_shelf_frame(&frame_app, panel.frame());
+                    }
+                });
             }
         }
         thread::sleep(Duration::from_millis(250));
@@ -271,6 +318,13 @@ fn handle_event(
         Err(_) => return,
     };
 
+    if !SHAKE_ENABLED.load(Ordering::Relaxed) {
+        state.is_dragging = false;
+        state.reset_motion(None);
+        state.window_started = None;
+        return;
+    }
+
     match event_type {
         CGEventType::LeftMouseDown => {
             MOUSE_DOWNS.fetch_add(1, Ordering::Relaxed);
@@ -289,11 +343,17 @@ fn handle_event(
 }
 
 fn process_drag_position(app: &AppHandle, state_ref: &Arc<Mutex<DragState>>, x: f64, y: f64) {
-    MOTION_SAMPLES.fetch_add(1, Ordering::Relaxed);
     let mut state = match state_ref.lock() {
         Ok(state) => state,
         Err(_) => return,
     };
+    if !SHAKE_ENABLED.load(Ordering::Relaxed) {
+        state.is_dragging = false;
+        state.reset_motion(None);
+        state.window_started = None;
+        return;
+    }
+    MOTION_SAMPLES.fetch_add(1, Ordering::Relaxed);
     let now = Instant::now();
 
     if !state.is_dragging {
@@ -310,7 +370,9 @@ fn process_drag_position(app: &AppHandle, state_ref: &Arc<Mutex<DragState>>, x: 
         state.window_started = Some(now);
     }
 
-    let shake_detected = state.track_horizontal_motion(x);
+    let (min_horizontal_travel, required_direction_changes) = shake_thresholds();
+    let shake_detected =
+        state.track_horizontal_motion(x, min_horizontal_travel, required_direction_changes);
     MAX_DIRECTION_CHANGES.fetch_max(state.direction_changes, Ordering::Relaxed);
 
     if shake_detected
@@ -332,11 +394,23 @@ fn set_monitor_status(app: &AppHandle, status: u8) {
 }
 
 pub fn monitor_status() -> &'static str {
+    if !SHAKE_ENABLED.load(Ordering::Relaxed) {
+        return "disabled";
+    }
     match MONITOR_STATUS.load(Ordering::Relaxed) {
         MONITOR_LISTENING => "listening",
         MONITOR_PERMISSION_REQUIRED => "permissionRequired",
         _ => "starting",
     }
+}
+
+pub fn set_enabled(app: &AppHandle, enabled: bool) {
+    SHAKE_ENABLED.store(enabled, Ordering::Relaxed);
+    let _ = app.emit("shake-monitor-status", monitor_status());
+}
+
+pub fn set_sensitivity(sensitivity: u8) {
+    SHAKE_SENSITIVITY.store(sensitivity.clamp(1, 5), Ordering::Relaxed);
 }
 
 pub fn diagnostics() -> ShakeDiagnostics {
@@ -352,7 +426,7 @@ pub fn show_for_test(app: &AppHandle) -> Result<(), String> {
     let window = app
         .get_webview_window("shake-shelf")
         .ok_or_else(|| "shake shelf window is unavailable".to_string())?;
-    show_window(&window, PanelPlacement::Center)
+    show_window(&window, PanelPlacement::Keep)
 }
 
 pub fn hide(app: &AppHandle) -> Result<(), String> {
@@ -360,9 +434,11 @@ pub fn hide(app: &AppHandle) -> Result<(), String> {
     let window = app
         .get_webview_window("shake-shelf")
         .ok_or_else(|| "shake shelf window is unavailable".to_string())?;
+    let frame_app = app.clone();
     window
         .run_on_main_thread(move || {
             if let Ok(panel) = shelf_panel() {
+                persist_shelf_frame(&frame_app, panel.frame());
                 panel.orderOut(None);
             }
         })
@@ -373,6 +449,7 @@ pub fn start_dragging(app: &AppHandle) -> Result<(), String> {
     let window = app
         .get_webview_window("shake-shelf")
         .ok_or_else(|| "shake shelf window is unavailable".to_string())?;
+    let frame_app = app.clone();
     window
         .run_on_main_thread(move || {
             let Some(marker) = MainThreadMarker::new() else {
@@ -383,6 +460,7 @@ pub fn start_dragging(app: &AppHandle) -> Result<(), String> {
             };
             if let Ok(panel) = shelf_panel() {
                 panel.performWindowDragWithEvent(&event);
+                persist_shelf_frame(&frame_app, panel.frame());
             }
         })
         .map_err(|error| error.to_string())
@@ -449,10 +527,10 @@ mod tests {
 
         let detected = samples
             .into_iter()
-            .any(|x| state.track_horizontal_motion(x));
+            .any(|x| state.track_horizontal_motion(x, 24.0, 3));
 
         assert!(detected);
-        assert_eq!(state.direction_changes, REQUIRED_DIRECTION_CHANGES);
+        assert_eq!(state.direction_changes, 3);
     }
 
     #[test]
@@ -460,10 +538,85 @@ mod tests {
         let mut state = DragState::default();
         let detected = [0.0, 8.0, -5.0, 10.0, -7.0, 4.0]
             .into_iter()
-            .any(|x| state.track_horizontal_motion(x));
+            .any(|x| state.track_horizontal_motion(x, 24.0, 3));
 
         assert!(!detected);
         assert_eq!(state.direction_changes, 0);
+    }
+
+    #[test]
+    fn higher_sensitivity_reduces_required_motion() {
+        assert_eq!(thresholds_for_sensitivity(1), (34.0, 4));
+        assert_eq!(thresholds_for_sensitivity(3), (24.0, 3));
+        assert_eq!(thresholds_for_sensitivity(5), (14.0, 2));
+    }
+}
+
+fn shake_thresholds() -> (f64, u8) {
+    thresholds_for_sensitivity(SHAKE_SENSITIVITY.load(Ordering::Relaxed))
+}
+
+fn thresholds_for_sensitivity(sensitivity: u8) -> (f64, u8) {
+    match sensitivity.clamp(1, 5) {
+        1 => (34.0, 4),
+        2 => (29.0, 3),
+        3 => (24.0, 3),
+        4 => (19.0, 3),
+        _ => (14.0, 2),
+    }
+}
+
+fn shelf_frame(rect: NSRect) -> ShelfFrame {
+    fn round_half(value: f64) -> f64 {
+        (value * 2.0).round() / 2.0
+    }
+
+    ShelfFrame {
+        x: round_half(rect.origin.x),
+        y: round_half(rect.origin.y),
+        width: round_half(rect.size.width.max(MIN_SHELF_WIDTH)),
+        height: round_half(rect.size.height.max(MIN_SHELF_HEIGHT)),
+    }
+}
+
+fn observe_shelf_frame(app: &AppHandle, rect: NSRect) {
+    let frame = shelf_frame(rect);
+    let Some(tracker) = SHELF_FRAME_TRACKER.get() else {
+        return;
+    };
+    let should_persist = {
+        let Ok(mut tracker) = tracker.lock() else {
+            return;
+        };
+        if tracker.observed != Some(frame) {
+            tracker.observed = Some(frame);
+            tracker.observed_since = Instant::now();
+            false
+        } else {
+            tracker.persisted != Some(frame) && tracker.observed_since.elapsed() >= FRAME_SAVE_DELAY
+        }
+    };
+    if should_persist {
+        persist_shelf_frame(app, rect);
+    }
+}
+
+fn persist_shelf_frame(app: &AppHandle, rect: NSRect) {
+    let frame = shelf_frame(rect);
+    let state = app.state::<Mutex<SettingsStore>>();
+    let saved = state
+        .lock()
+        .map_err(|_| "failed to lock settings".to_string())
+        .and_then(|mut store| store.set_shelf_frame(frame))
+        .is_ok();
+    if saved {
+        if let Some(tracker) = SHELF_FRAME_TRACKER.get() {
+            if let Ok(mut tracker) = tracker.lock() {
+                tracker.observed = Some(frame);
+                tracker.observed_since = Instant::now();
+                tracker.persisted = Some(frame);
+            }
+        }
     }
 }
 
@@ -492,7 +645,6 @@ fn bring_to_front(window: &tauri::WebviewWindow, placement: PanelPlacement) -> R
                             pointer.y - 24.0,
                         ));
                     }
-                    PanelPlacement::Center => panel.center(),
                 }
                 panel.orderFrontRegardless();
             }
