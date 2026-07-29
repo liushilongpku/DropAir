@@ -107,7 +107,7 @@ fn shake_monitor_diagnostics() -> shake_shelf::ShakeDiagnostics {
 fn shake_monitor_diagnostics() -> serde_json::Value {
     serde_json::json!({
         "mouseDowns": 0,
-        "dragEvents": 0,
+        "motionSamples": 0,
         "maxDirectionChanges": 0,
         "triggers": 0
     })

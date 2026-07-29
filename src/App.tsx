@@ -34,7 +34,7 @@ type DropAirFile = File & {
 
 type ShakeDiagnostics = {
   mouseDowns: number;
-  dragEvents: number;
+  motionSamples: number;
   maxDirectionChanges: number;
   triggers: number;
 };
@@ -309,7 +309,7 @@ function App() {
         </div>
         {shakeDiagnostics && (
           <div className="monitor-diagnostics">
-            D {shakeDiagnostics.mouseDowns} / Drag {shakeDiagnostics.dragEvents} / Turns{" "}
+            D {shakeDiagnostics.mouseDowns} / Motion {shakeDiagnostics.motionSamples} / Turns{" "}
             {shakeDiagnostics.maxDirectionChanges} / Trigger {shakeDiagnostics.triggers}
           </div>
         )}

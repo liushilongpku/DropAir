@@ -1,8 +1,9 @@
 use core_foundation::runloop::CFRunLoop;
 use core_graphics::event::{
     CGEvent, CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement, CGEventType,
-    CallbackResult,
+    CGMouseButton, CallbackResult,
 };
+use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use serde::Serialize;
 use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
@@ -20,7 +21,7 @@ const MONITOR_PERMISSION_REQUIRED: u8 = 2;
 
 static MONITOR_STATUS: AtomicU8 = AtomicU8::new(MONITOR_STARTING);
 static MOUSE_DOWNS: AtomicU64 = AtomicU64::new(0);
-static DRAG_EVENTS: AtomicU64 = AtomicU64::new(0);
+static MOTION_SAMPLES: AtomicU64 = AtomicU64::new(0);
 static MAX_DIRECTION_CHANGES: AtomicU8 = AtomicU8::new(0);
 static TRIGGERS: AtomicU64 = AtomicU64::new(0);
 
@@ -28,9 +29,14 @@ static TRIGGERS: AtomicU64 = AtomicU64::new(0);
 #[serde(rename_all = "camelCase")]
 pub struct ShakeDiagnostics {
     mouse_downs: u64,
-    drag_events: u64,
+    motion_samples: u64,
     max_direction_changes: u8,
     triggers: u64,
+}
+
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGEventSourceButtonState(state_id: CGEventSourceStateID, button: CGMouseButton) -> bool;
 }
 
 #[derive(Default)]
@@ -99,13 +105,17 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
     .visible(false)
     .build()?;
 
-    let app = app.clone();
-    thread::spawn(move || watch_drag_shake(app));
+    let state = Arc::new(Mutex::new(DragState::default()));
+    let event_app = app.clone();
+    let event_state = Arc::clone(&state);
+    thread::spawn(move || watch_drag_events(event_app, event_state));
+
+    let polling_app = app.clone();
+    thread::spawn(move || poll_drag_position(polling_app, state));
     Ok(())
 }
 
-fn watch_drag_shake(app: AppHandle) {
-    let state = Arc::new(Mutex::new(DragState::default()));
+fn watch_drag_events(app: AppHandle, state: Arc<Mutex<DragState>>) {
     let callback_state = Arc::clone(&state);
     let callback_app = app.clone();
     let result = CGEventTap::with_enabled(
@@ -132,13 +142,43 @@ fn watch_drag_shake(app: AppHandle) {
     }
 }
 
+fn poll_drag_position(app: AppHandle, state: Arc<Mutex<DragState>>) {
+    loop {
+        if left_button_is_pressed() {
+            if let Some((x, y)) = current_pointer_position() {
+                process_drag_position(&app, &state, x, y);
+            }
+        } else if let Ok(mut state) = state.lock() {
+            state.is_dragging = false;
+        }
+
+        thread::sleep(Duration::from_millis(16));
+    }
+}
+
+fn left_button_is_pressed() -> bool {
+    unsafe {
+        CGEventSourceButtonState(
+            CGEventSourceStateID::CombinedSessionState,
+            CGMouseButton::Left,
+        )
+    }
+}
+
+fn current_pointer_position() -> Option<(f64, f64)> {
+    let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState).ok()?;
+    let event = CGEvent::new(source).ok()?;
+    let point = event.location();
+    Some((point.x, point.y))
+}
+
 fn handle_event(
     app: &AppHandle,
-    state: &Arc<Mutex<DragState>>,
+    state_ref: &Arc<Mutex<DragState>>,
     event_type: CGEventType,
     event: &CGEvent,
 ) {
-    let mut state = match state.lock() {
+    let mut state = match state_ref.lock() {
         Ok(state) => state,
         Err(_) => return,
     };
@@ -152,41 +192,49 @@ fn handle_event(
         }
         CGEventType::LeftMouseUp => state.is_dragging = false,
         CGEventType::LeftMouseDragged => {
-            DRAG_EVENTS.fetch_add(1, Ordering::Relaxed);
             let point = event.location();
-            let (x, y) = (point.x, point.y);
-            let now = Instant::now();
-
-            if !state.is_dragging {
-                state.is_dragging = true;
-                state.reset_motion(Some(x));
-                state.window_started = Some(now);
-            }
-
-            let window_expired = state
-                .window_started
-                .is_none_or(|started| now.duration_since(started).as_millis() > SHAKE_WINDOW_MS);
-            if window_expired {
-                state.reset_motion(Some(x));
-                state.window_started = Some(now);
-            }
-
-            let shake_detected = state.track_horizontal_motion(x);
-            MAX_DIRECTION_CHANGES.fetch_max(state.direction_changes, Ordering::Relaxed);
-
-            if shake_detected
-                && state
-                    .last_trigger
-                    .is_none_or(|last| now.duration_since(last) >= TRIGGER_COOLDOWN)
-            {
-                TRIGGERS.fetch_add(1, Ordering::Relaxed);
-                state.last_trigger = Some(now);
-                state.reset_motion(Some(x));
-                state.window_started = Some(now);
-                show_shelf(app, x, y);
-            }
+            drop(state);
+            process_drag_position(app, state_ref, point.x, point.y);
         }
         _ => {}
+    }
+}
+
+fn process_drag_position(app: &AppHandle, state_ref: &Arc<Mutex<DragState>>, x: f64, y: f64) {
+    MOTION_SAMPLES.fetch_add(1, Ordering::Relaxed);
+    let mut state = match state_ref.lock() {
+        Ok(state) => state,
+        Err(_) => return,
+    };
+    let now = Instant::now();
+
+    if !state.is_dragging {
+        state.is_dragging = true;
+        state.reset_motion(Some(x));
+        state.window_started = Some(now);
+    }
+
+    let window_expired = state
+        .window_started
+        .is_none_or(|started| now.duration_since(started).as_millis() > SHAKE_WINDOW_MS);
+    if window_expired {
+        state.reset_motion(Some(x));
+        state.window_started = Some(now);
+    }
+
+    let shake_detected = state.track_horizontal_motion(x);
+    MAX_DIRECTION_CHANGES.fetch_max(state.direction_changes, Ordering::Relaxed);
+
+    if shake_detected
+        && state
+            .last_trigger
+            .is_none_or(|last| now.duration_since(last) >= TRIGGER_COOLDOWN)
+    {
+        TRIGGERS.fetch_add(1, Ordering::Relaxed);
+        state.last_trigger = Some(now);
+        state.reset_motion(Some(x));
+        state.window_started = Some(now);
+        show_shelf(app, x, y);
     }
 }
 
@@ -206,7 +254,7 @@ pub fn monitor_status() -> &'static str {
 pub fn diagnostics() -> ShakeDiagnostics {
     ShakeDiagnostics {
         mouse_downs: MOUSE_DOWNS.load(Ordering::Relaxed),
-        drag_events: DRAG_EVENTS.load(Ordering::Relaxed),
+        motion_samples: MOTION_SAMPLES.load(Ordering::Relaxed),
         max_direction_changes: MAX_DIRECTION_CHANGES.load(Ordering::Relaxed),
         triggers: TRIGGERS.load(Ordering::Relaxed),
     }
