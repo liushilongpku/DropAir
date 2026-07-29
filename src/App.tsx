@@ -14,7 +14,7 @@ import {
   Trash2,
   X
 } from "lucide-react";
-import { DragEvent, useEffect, useMemo, useState } from "react";
+import { DragEvent, MouseEvent, useEffect, useMemo, useState } from "react";
 
 const isShelfWindow = new URLSearchParams(window.location.search).has("shelf");
 
@@ -244,7 +244,8 @@ function App() {
     });
   }
 
-  function beginNativeFileDrag(event: DragEvent<HTMLElement>, path: string) {
+  function beginNativeFileDrag(event: MouseEvent<HTMLElement>, path: string) {
+    if (event.button !== 0) return;
     event.preventDefault();
     void invoke("begin_native_file_drag", { path }).catch((error) => {
       setStatus(toErrorMessage(error));
@@ -308,10 +309,13 @@ function App() {
           <div className="shake-shelf-items">
             {items.slice(0, 2).map((item) => (
               <div
-                className="shake-shelf-item"
+                className={`shake-shelf-item${item.kind === "file" ? " is-file" : ""}`}
                 key={item.id}
-                draggable={item.kind === "file"}
-                onDragStart={(event) => beginNativeFileDrag(event, item.path)}
+                onMouseDown={
+                  item.kind === "file"
+                    ? (event) => beginNativeFileDrag(event, item.path)
+                    : undefined
+                }
               >
                 {item.kind === "directory" ? <Folder size={16} /> : <FileText size={16} />}
                 <span>{item.name}</span>

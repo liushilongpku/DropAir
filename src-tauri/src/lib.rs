@@ -167,15 +167,9 @@ fn start_shake_shelf_drag(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn begin_native_file_drag(path: String, app: tauri::AppHandle) -> Result<(), String> {
+fn begin_native_file_drag(path: String, app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    {
-        return tauri::async_runtime::spawn_blocking(move || {
-            shake_shelf::begin_file_drag(&app, path)
-        })
-        .await
-        .map_err(|error| error.to_string())?;
-    }
+    return shake_shelf::begin_file_drag(&app, path);
 
     #[cfg(not(target_os = "macos"))]
     Err("native file drag is currently available only on macOS".to_string())
