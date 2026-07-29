@@ -7,6 +7,7 @@ import {
   FileArchive,
   FileText,
   Folder,
+  FolderOpen,
   Laptop,
   Loader2,
   PanelTopOpen,
@@ -260,6 +261,24 @@ function App() {
     }
   }
 
+  async function openShelfPath(path: string) {
+    try {
+      await invoke("open_shelf_path", { path });
+      setStatus("Item opened");
+    } catch (error) {
+      setStatus(toErrorMessage(error));
+    }
+  }
+
+  async function revealShelfPath(path: string) {
+    try {
+      await invoke("reveal_shelf_path", { path });
+      setStatus("Item revealed in Finder");
+    } catch (error) {
+      setStatus(toErrorMessage(error));
+    }
+  }
+
   async function toggleAutostart() {
     setIsBusy(true);
     try {
@@ -415,7 +434,7 @@ function App() {
           </div>
         ) : (
           <div className="shake-shelf-items">
-            {items.slice(0, 2).map((item) => (
+            {items.map((item) => (
               <div
                 className={`shake-shelf-item${item.kind === "file" ? " is-file" : ""}${item.kind === "text" ? " is-text" : ""}`}
                 key={item.id}
@@ -568,6 +587,11 @@ function App() {
                       ? (event) => beginTextDrag(event, item.content as string)
                       : undefined
                   }
+                  onDoubleClick={
+                    item.kind === "file" || item.kind === "directory"
+                      ? () => void openShelfPath(item.path)
+                      : undefined
+                  }
                 >
                   <div className="item-icon" aria-hidden="true">
                     {item.kind === "directory" ? <Folder size={20} /> : <FileText size={20} />}
@@ -578,6 +602,28 @@ function App() {
                   </div>
                   <div className="item-meta">
                     <span>{formatSize(item.size)}</span>
+                    {(item.kind === "file" || item.kind === "directory") && (
+                      <>
+                        <button
+                          className="icon-button small"
+                          type="button"
+                          onClick={() => void openShelfPath(item.path)}
+                          title="Open item"
+                          aria-label={`Open ${item.name}`}
+                        >
+                          <ExternalLink size={16} />
+                        </button>
+                        <button
+                          className="icon-button small"
+                          type="button"
+                          onClick={() => void revealShelfPath(item.path)}
+                          title="Show in Finder"
+                          aria-label={`Show ${item.name} in Finder`}
+                        >
+                          <FolderOpen size={16} />
+                        </button>
+                      </>
+                    )}
                     <button
                       className="icon-button small"
                       type="button"

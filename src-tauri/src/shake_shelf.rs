@@ -497,6 +497,14 @@ pub fn show_for_test(app: &AppHandle) -> Result<(), String> {
     show_window(&window, PanelPlacement::Keep)
 }
 
+pub fn toggle(app: &AppHandle) -> Result<(), String> {
+    if SHELF_VISIBLE.load(Ordering::Acquire) {
+        hide(app)
+    } else {
+        show_for_test(app)
+    }
+}
+
 pub fn hide(app: &AppHandle) -> Result<(), String> {
     SHELF_VISIBLE.store(false, Ordering::Release);
     let window = app

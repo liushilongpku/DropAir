@@ -1,10 +1,11 @@
-use serde::Serialize;
-use std::path::Path;
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 mod settings;
 
@@ -18,13 +19,13 @@ const TRAY_OPEN: &str = "open";
 const TRAY_SHOW_SHELF: &str = "show-shelf";
 const TRAY_QUIT: &str = "quit";
 
-#[derive(Default)]
 struct AppState {
+    path: PathBuf,
     next_item_id: u64,
     shelf_items: Vec<ShelfItem>,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ShelfItem {
     id: u64,
@@ -35,13 +36,82 @@ struct ShelfItem {
     size: Option<u64>,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum ShelfItemKind {
     File,
     Directory,
     Text,
     Other,
+}
+
+#[derive(Default, Deserialize, Serialize)]
+#[serde(default, rename_all = "camelCase")]
+struct PersistedShelf {
+    next_item_id: u64,
+    items: Vec<ShelfItem>,
+}
+
+impl AppState {
+    fn load(app: &tauri::AppHandle) -> Result<Self, String> {
+        let path = app
+            .path()
+            .app_config_dir()
+            .map_err(|error| error.to_string())?
+            .join("shelf.json");
+        let persisted = match std::fs::read_to_string(&path) {
+            Ok(contents) => serde_json::from_str(&contents).unwrap_or_default(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => PersistedShelf::default(),
+            Err(error) => return Err(error.to_string()),
+        };
+        let max_item_id = persisted
+            .items
+            .iter()
+            .map(|item| item.id)
+            .max()
+            .unwrap_or(0);
+        Ok(Self {
+            path,
+            next_item_id: persisted.next_item_id.max(max_item_id),
+            shelf_items: persisted.items,
+        })
+    }
+
+    fn save(&self) -> Result<(), String> {
+        let parent = self
+            .path
+            .parent()
+            .ok_or_else(|| "shelf path has no parent directory".to_string())?;
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        let temporary_path = self.path.with_extension("json.tmp");
+        let persisted = PersistedShelf {
+            next_item_id: self.next_item_id,
+            items: self.shelf_items.clone(),
+        };
+        let contents = serde_json::to_vec_pretty(&persisted).map_err(|error| error.to_string())?;
+        std::fs::write(&temporary_path, contents).map_err(|error| error.to_string())?;
+        std::fs::rename(&temporary_path, &self.path).map_err(|error| error.to_string())
+    }
+}
+
+fn update_shelf<F>(app: &tauri::AppHandle, update: F) -> Result<Vec<ShelfItem>, String>
+where
+    F: FnOnce(&mut AppState),
+{
+    let state = app.state::<Mutex<AppState>>();
+    let mut state = state.lock().map_err(|_| "failed to lock app state")?;
+    let previous_id = state.next_item_id;
+    let previous_items = state.shelf_items.clone();
+    update(&mut state);
+    if let Err(error) = state.save() {
+        state.next_item_id = previous_id;
+        state.shelf_items = previous_items;
+        return Err(error);
+    }
+    let items = state.shelf_items.clone();
+    app.emit("shelf-changed", &items)
+        .map_err(|error| error.to_string())?;
+    Ok(items)
 }
 
 #[tauri::command]
@@ -51,27 +121,18 @@ fn list_shelf_items(state: tauri::State<'_, Mutex<AppState>>) -> Result<Vec<Shel
 }
 
 #[tauri::command]
-fn add_shelf_paths(
-    paths: Vec<String>,
-    state: tauri::State<'_, Mutex<AppState>>,
-    app: tauri::AppHandle,
-) -> Result<Vec<ShelfItem>, String> {
-    let mut state = state.lock().map_err(|_| "failed to lock app state")?;
+fn add_shelf_paths(paths: Vec<String>, app: tauri::AppHandle) -> Result<Vec<ShelfItem>, String> {
+    update_shelf(&app, move |state| {
+        for path in paths {
+            if path.trim().is_empty() || state.shelf_items.iter().any(|item| item.path == path) {
+                continue;
+            }
 
-    for path in paths {
-        if path.trim().is_empty() || state.shelf_items.iter().any(|item| item.path == path) {
-            continue;
+            state.next_item_id += 1;
+            let id = state.next_item_id;
+            state.shelf_items.push(build_shelf_item(id, path));
         }
-
-        state.next_item_id += 1;
-        let id = state.next_item_id;
-        state.shelf_items.push(build_shelf_item(id, path));
-    }
-
-    let items = state.shelf_items.clone();
-    app.emit("shelf-changed", &items)
-        .map_err(|error| error.to_string())?;
-    Ok(items)
+    })
 }
 
 #[tauri::command]
@@ -84,49 +145,29 @@ fn add_shelf_text_to_app(app: &tauri::AppHandle, text: String) -> Result<Vec<She
         return Err("text is empty".to_string());
     }
 
-    let state = app.state::<Mutex<AppState>>();
-    let mut state = state.lock().map_err(|_| "failed to lock app state")?;
-    if !state
-        .shelf_items
-        .iter()
-        .any(|item| item.content.as_deref() == Some(text.as_str()))
-    {
-        state.next_item_id += 1;
-        let id = state.next_item_id;
-        state.shelf_items.push(build_text_shelf_item(id, text));
-    }
-
-    let items = state.shelf_items.clone();
-    app.emit("shelf-changed", &items)
-        .map_err(|error| error.to_string())?;
-    Ok(items)
+    update_shelf(app, move |state| {
+        if !state
+            .shelf_items
+            .iter()
+            .any(|item| item.content.as_deref() == Some(text.as_str()))
+        {
+            state.next_item_id += 1;
+            let id = state.next_item_id;
+            state.shelf_items.push(build_text_shelf_item(id, text));
+        }
+    })
 }
 
 #[tauri::command]
-fn remove_shelf_item(
-    id: u64,
-    state: tauri::State<'_, Mutex<AppState>>,
-    app: tauri::AppHandle,
-) -> Result<Vec<ShelfItem>, String> {
-    let mut state = state.lock().map_err(|_| "failed to lock app state")?;
-    state.shelf_items.retain(|item| item.id != id);
-    let items = state.shelf_items.clone();
-    app.emit("shelf-changed", &items)
-        .map_err(|error| error.to_string())?;
-    Ok(items)
+fn remove_shelf_item(id: u64, app: tauri::AppHandle) -> Result<Vec<ShelfItem>, String> {
+    update_shelf(&app, move |state| {
+        state.shelf_items.retain(|item| item.id != id);
+    })
 }
 
 #[tauri::command]
-fn clear_shelf(
-    state: tauri::State<'_, Mutex<AppState>>,
-    app: tauri::AppHandle,
-) -> Result<Vec<ShelfItem>, String> {
-    let mut state = state.lock().map_err(|_| "failed to lock app state")?;
-    state.shelf_items.clear();
-    let items = state.shelf_items.clone();
-    app.emit("shelf-changed", &items)
-        .map_err(|error| error.to_string())?;
-    Ok(items)
+fn clear_shelf(app: tauri::AppHandle) -> Result<Vec<ShelfItem>, String> {
+    update_shelf(&app, |state| state.shelf_items.clear())
 }
 
 #[tauri::command]
@@ -274,6 +315,38 @@ fn begin_native_file_drag(path: String, app: tauri::AppHandle) -> Result<(), Str
     Err("native file drag is currently available only on macOS".to_string())
 }
 
+#[tauri::command]
+fn open_shelf_path(path: String) -> Result<(), String> {
+    run_macos_open(&path, false)
+}
+
+#[tauri::command]
+fn reveal_shelf_path(path: String) -> Result<(), String> {
+    run_macos_open(&path, true)
+}
+
+fn run_macos_open(path: &str, reveal: bool) -> Result<(), String> {
+    if path.trim().is_empty() || !Path::new(path).exists() {
+        return Err("the shelf item no longer exists".to_string());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let mut command = std::process::Command::new("open");
+        if reveal {
+            command.arg("-R");
+        }
+        command
+            .arg(path)
+            .spawn()
+            .map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    Err("opening shelf items is currently available only on macOS".to_string())
+}
+
 fn build_shelf_item(id: u64, path: String) -> ShelfItem {
     let path_ref = Path::new(&path);
     let metadata = std::fs::metadata(path_ref).ok();
@@ -341,6 +414,21 @@ mod tests {
         assert!(item.name.ends_with("..."));
         assert_eq!(item.name.trim_end_matches("...").chars().count(), 80);
     }
+
+    #[test]
+    fn persisted_shelf_round_trips_text_items() {
+        let persisted = PersistedShelf {
+            next_item_id: 7,
+            items: vec![build_text_shelf_item(7, "saved text".to_string())],
+        };
+
+        let encoded = serde_json::to_string(&persisted).unwrap();
+        let decoded: PersistedShelf = serde_json::from_str(&encoded).unwrap();
+
+        assert_eq!(decoded.next_item_id, 7);
+        assert_eq!(decoded.items[0].content.as_deref(), Some("saved text"));
+        assert!(matches!(decoded.items[0].kind, ShelfItemKind::Text));
+    }
 }
 
 fn show_main_window(app: &tauri::AppHandle) {
@@ -381,6 +469,17 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let launched_from_autostart = std::env::args().any(|arg| arg == AUTOSTART_ARG);
+    let shortcut_plugin = tauri_plugin_global_shortcut::Builder::new()
+        .with_handler(|app, _shortcut, event| {
+            if event.state == ShortcutState::Pressed {
+                #[cfg(target_os = "macos")]
+                let _ = shake_shelf::toggle(app);
+
+                #[cfg(not(target_os = "macos"))]
+                show_main_window(app);
+            }
+        })
+        .build();
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             if !args.iter().any(|arg| arg == AUTOSTART_ARG) {
@@ -391,8 +490,16 @@ pub fn run() {
             MacosLauncher::LaunchAgent,
             Some(vec![AUTOSTART_ARG]),
         ))
-        .manage(Mutex::new(AppState::default()))
+        .plugin(shortcut_plugin)
         .setup(|app| {
+            let app_state = AppState::load(app.handle()).map_err(std::io::Error::other)?;
+            app.manage(Mutex::new(app_state));
+            if let Err(error) = app
+                .global_shortcut()
+                .register("CommandOrControl+Shift+Space")
+            {
+                eprintln!("failed to register DropAir global shortcut: {error}");
+            }
             let settings_store =
                 SettingsStore::load(app.handle()).map_err(std::io::Error::other)?;
             let settings = settings_store.settings();
@@ -429,7 +536,9 @@ pub fn run() {
             show_shake_shelf_for_test,
             hide_shake_shelf,
             start_shake_shelf_drag,
-            begin_native_file_drag
+            begin_native_file_drag,
+            open_shelf_path,
+            reveal_shelf_path
         ])
         .build(tauri::generate_context!())
         .expect("error while building DropAir");
