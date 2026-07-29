@@ -1,7 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   CheckCircle2,
   FileArchive,
@@ -161,7 +160,7 @@ function App() {
       setItems(nextItems);
       setStatus(`${paths.length} item${paths.length === 1 ? "" : "s"} added`);
       if (isShelfWindow) {
-        await getCurrentWindow().hide();
+        await invoke("hide_shake_shelf");
       }
     } catch (error) {
       setStatus(toErrorMessage(error));

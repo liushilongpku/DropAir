@@ -4,14 +4,15 @@ use core_graphics::event::{
     CGMouseButton, CallbackResult,
 };
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
-use objc2::MainThreadMarker;
+use objc2::{rc::Retained, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
-    NSApplication, NSStatusWindowLevel, NSView, NSWindow, NSWindowCollectionBehavior,
+    NSApplication, NSBackingStoreType, NSPanel, NSStatusWindowLevel, NSView, NSWindow,
+    NSWindowCollectionBehavior, NSWindowStyleMask,
 };
 use objc2_foundation::{NSRect, NSSize, NSString};
 use serde::Serialize;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -31,6 +32,8 @@ static MOUSE_DOWNS: AtomicU64 = AtomicU64::new(0);
 static MOTION_SAMPLES: AtomicU64 = AtomicU64::new(0);
 static MAX_DIRECTION_CHANGES: AtomicU8 = AtomicU8::new(0);
 static TRIGGERS: AtomicU64 = AtomicU64::new(0);
+static SHELF_PANEL: AtomicUsize = AtomicUsize::new(0);
+static SHELF_VISIBLE: AtomicBool = AtomicBool::new(false);
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -112,7 +115,7 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
     .skip_taskbar(true)
     .visible(false)
     .build()?;
-    configure_native_window(&window)?;
+    create_shelf_panel(&window)?;
 
     let state = Arc::new(Mutex::new(DragState::default()));
     let event_app = app.clone();
@@ -127,11 +130,43 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-fn configure_native_window(window: &tauri::WebviewWindow) -> tauri::Result<()> {
-    let window_ptr = window.ns_window()?;
-    let native_window = unsafe { &*(window_ptr.cast::<NSWindow>()) };
-    configure_native_window_handle(native_window);
+fn create_shelf_panel(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+    let marker = MainThreadMarker::new().expect("shelf setup must run on the macOS main thread");
+    let source_ptr = window.ns_window()?;
+    let source_window = unsafe { &*(source_ptr.cast::<NSWindow>()) };
+    let content_view = source_window
+        .contentView()
+        .expect("Tauri shelf window must have a content view");
+    source_window.setContentView(None);
+
+    let content_rect = NSRect::new(source_window.frame().origin, NSSize::new(150.0, 130.0));
+    let style = NSWindowStyleMask::Resizable | NSWindowStyleMask::NonactivatingPanel;
+    let panel = NSPanel::initWithContentRect_styleMask_backing_defer(
+        NSPanel::alloc(marker),
+        content_rect,
+        style,
+        NSBackingStoreType::Buffered,
+        false,
+    );
+    panel.setContentView(Some(&content_view));
+    panel.setContentMinSize(NSSize::new(150.0, 130.0));
+    panel.setFloatingPanel(true);
+    panel.setBecomesKeyOnlyIfNeeded(true);
+    unsafe { panel.setReleasedWhenClosed(false) };
+    configure_native_window_handle(&panel);
+
+    let panel_ptr = Retained::into_raw(panel) as usize;
+    SHELF_PANEL.store(panel_ptr, Ordering::Release);
     Ok(())
+}
+
+fn shelf_panel() -> Result<&'static NSPanel, String> {
+    MainThreadMarker::new().ok_or_else(|| "not on the macOS main thread".to_string())?;
+    let panel_ptr = SHELF_PANEL.load(Ordering::Acquire);
+    if panel_ptr == 0 {
+        return Err("shake shelf panel is unavailable".to_string());
+    }
+    Ok(unsafe { &*(panel_ptr as *const NSPanel) })
 }
 
 fn configure_native_window_handle(native_window: &NSWindow) {
@@ -153,9 +188,9 @@ fn configure_native_window_handle(native_window: &NSWindow) {
 
 fn keep_shelf_front(app: AppHandle) {
     loop {
-        if let Some(window) = app.get_webview_window("shake-shelf") {
-            if window.is_visible().unwrap_or(false) {
-                let _ = bring_to_front(&window);
+        if SHELF_VISIBLE.load(Ordering::Acquire) {
+            if let Some(window) = app.get_webview_window("shake-shelf") {
+                let _ = bring_to_front(&window, false);
             }
         }
         thread::sleep(Duration::from_millis(250));
@@ -316,16 +351,35 @@ pub fn show_for_test(app: &AppHandle) -> Result<(), String> {
 }
 
 pub fn hide(app: &AppHandle) -> Result<(), String> {
-    app.get_webview_window("shake-shelf")
-        .ok_or_else(|| "shake shelf window is unavailable".to_string())?
-        .hide()
+    SHELF_VISIBLE.store(false, Ordering::Release);
+    let window = app
+        .get_webview_window("shake-shelf")
+        .ok_or_else(|| "shake shelf window is unavailable".to_string())?;
+    window
+        .run_on_main_thread(move || {
+            if let Ok(panel) = shelf_panel() {
+                panel.orderOut(None);
+            }
+        })
         .map_err(|error| error.to_string())
 }
 
 pub fn start_dragging(app: &AppHandle) -> Result<(), String> {
-    app.get_webview_window("shake-shelf")
-        .ok_or_else(|| "shake shelf window is unavailable".to_string())?
-        .start_dragging()
+    let window = app
+        .get_webview_window("shake-shelf")
+        .ok_or_else(|| "shake shelf window is unavailable".to_string())?;
+    window
+        .run_on_main_thread(move || {
+            let Some(marker) = MainThreadMarker::new() else {
+                return;
+            };
+            let Some(event) = NSApplication::sharedApplication(marker).currentEvent() else {
+                return;
+            };
+            if let Ok(panel) = shelf_panel() {
+                panel.performWindowDragWithEvent(&event);
+            }
+        })
         .map_err(|error| error.to_string())
 }
 
@@ -423,18 +477,24 @@ fn show_shelf(app: &AppHandle, x: f64, y: f64) {
 }
 
 fn show_window(window: &tauri::WebviewWindow) -> Result<(), String> {
-    window.show().map_err(|error| error.to_string())?;
-    bring_to_front(window)
+    SHELF_VISIBLE.store(true, Ordering::Release);
+    bring_to_front(window, true)
 }
 
-fn bring_to_front(window: &tauri::WebviewWindow) -> Result<(), String> {
+fn bring_to_front(
+    window: &tauri::WebviewWindow,
+    match_source_position: bool,
+) -> Result<(), String> {
     let callback_window = window.clone();
     window
         .run_on_main_thread(move || {
-            if let Ok(window_ptr) = callback_window.ns_window() {
-                let native_window = unsafe { &*(window_ptr.cast::<NSWindow>()) };
-                configure_native_window_handle(native_window);
-                native_window.orderFrontRegardless();
+            if let (Ok(window_ptr), Ok(panel)) = (callback_window.ns_window(), shelf_panel()) {
+                if match_source_position {
+                    let source_window = unsafe { &*(window_ptr.cast::<NSWindow>()) };
+                    panel.setFrameOrigin(source_window.frame().origin);
+                }
+                configure_native_window_handle(panel);
+                panel.orderFrontRegardless();
             }
         })
         .map_err(|error| error.to_string())
