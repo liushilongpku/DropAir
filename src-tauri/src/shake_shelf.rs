@@ -7,7 +7,8 @@ use core_graphics::event::{
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use objc2::{rc::Retained, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
-    NSApplication, NSBackingStoreType, NSEvent, NSEventType, NSPanel, NSStatusWindowLevel,
+    NSApplication, NSBackingStoreType, NSEvent, NSEventType, NSPanel, NSPasteboard,
+    NSPasteboardNameDrag, NSPasteboardTypeFileURL, NSPasteboardTypeString, NSStatusWindowLevel,
     NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
 };
 use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
@@ -56,6 +57,7 @@ extern "C" {
 #[derive(Default)]
 struct DragState {
     is_dragging: bool,
+    observed_drag_event: bool,
     horizontal_extreme_x: Option<f64>,
     direction: i8,
     direction_changes: u8,
@@ -318,6 +320,23 @@ fn handle_event(
         Err(_) => return,
     };
 
+    match event_type {
+        CGEventType::LeftMouseDown => state.observed_drag_event = false,
+        CGEventType::LeftMouseDragged => state.observed_drag_event = true,
+        _ => {}
+    }
+
+    if matches!(event_type, CGEventType::LeftMouseUp) {
+        let observed_drag_event = state.observed_drag_event;
+        state.is_dragging = false;
+        state.observed_drag_event = false;
+        drop(state);
+        if observed_drag_event {
+            capture_text_drop_if_over_app(app);
+        }
+        return;
+    }
+
     if !SHAKE_ENABLED.load(Ordering::Relaxed) {
         state.is_dragging = false;
         state.reset_motion(None);
@@ -332,7 +351,6 @@ fn handle_event(
             state.reset_motion(None);
             state.window_started = Some(Instant::now());
         }
-        CGEventType::LeftMouseUp => state.is_dragging = false,
         CGEventType::LeftMouseDragged => {
             let point = event.location();
             drop(state);
@@ -384,8 +402,58 @@ fn process_drag_position(app: &AppHandle, state_ref: &Arc<Mutex<DragState>>, x: 
         state.last_trigger = Some(now);
         state.reset_motion(Some(x));
         state.window_started = Some(now);
+        if let Some(text) = dragged_plain_text() {
+            let _ = crate::add_shelf_text_to_app(app, text);
+        }
         show_shelf(app, x, y);
     }
+}
+
+fn dragged_plain_text() -> Option<String> {
+    // AppKit owns these immutable pasteboard name and type constants for the process lifetime.
+    let text = unsafe {
+        let pasteboard = NSPasteboard::pasteboardWithName(NSPasteboardNameDrag);
+        if pasteboard.stringForType(NSPasteboardTypeFileURL).is_some() {
+            return None;
+        }
+        pasteboard
+            .stringForType(NSPasteboardTypeString)?
+            .to_string()
+    };
+    (!text.trim().is_empty()).then_some(text)
+}
+
+fn capture_text_drop_if_over_app(app: &AppHandle) {
+    let Some(text) = dragged_plain_text() else {
+        return;
+    };
+    let Some(main_window) = app.get_webview_window("main") else {
+        return;
+    };
+    let dispatch_window = main_window.clone();
+    let drop_app = app.clone();
+    let _ = dispatch_window.run_on_main_thread(move || {
+        let pointer = NSEvent::mouseLocation();
+        let inside_shelf = SHELF_VISIBLE.load(Ordering::Acquire)
+            && shelf_panel()
+                .map(|panel| point_is_inside(pointer, panel.frame()))
+                .unwrap_or(false);
+        let inside_main = main_window
+            .ns_window()
+            .ok()
+            .map(|pointer| unsafe { &*(pointer.cast::<NSWindow>()) })
+            .is_some_and(|window| window.isVisible() && point_is_inside(pointer, window.frame()));
+        if inside_shelf || inside_main {
+            let _ = crate::add_shelf_text_to_app(&drop_app, text);
+        }
+    });
+}
+
+fn point_is_inside(point: NSPoint, frame: NSRect) -> bool {
+    point.x >= frame.origin.x
+        && point.x <= frame.origin.x + frame.size.width
+        && point.y >= frame.origin.y
+        && point.y <= frame.origin.y + frame.size.height
 }
 
 fn set_monitor_status(app: &AppHandle, status: u8) {

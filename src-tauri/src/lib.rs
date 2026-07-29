@@ -75,15 +75,16 @@ fn add_shelf_paths(
 }
 
 #[tauri::command]
-fn add_shelf_text(
-    text: String,
-    state: tauri::State<'_, Mutex<AppState>>,
-    app: tauri::AppHandle,
-) -> Result<Vec<ShelfItem>, String> {
+fn add_shelf_text(text: String, app: tauri::AppHandle) -> Result<Vec<ShelfItem>, String> {
+    add_shelf_text_to_app(&app, text)
+}
+
+fn add_shelf_text_to_app(app: &tauri::AppHandle, text: String) -> Result<Vec<ShelfItem>, String> {
     if text.trim().is_empty() {
         return Err("text is empty".to_string());
     }
 
+    let state = app.state::<Mutex<AppState>>();
     let mut state = state.lock().map_err(|_| "failed to lock app state")?;
     if !state
         .shelf_items
