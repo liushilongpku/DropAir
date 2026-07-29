@@ -5,7 +5,9 @@ use core_graphics::event::{
 };
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use objc2::MainThreadMarker;
-use objc2_app_kit::{NSApplication, NSView};
+use objc2_app_kit::{
+    NSApplication, NSFloatingWindowLevel, NSView, NSWindow, NSWindowCollectionBehavior,
+};
 use objc2_foundation::{NSRect, NSSize, NSString};
 use serde::Serialize;
 use std::path::Path;
@@ -95,7 +97,7 @@ impl DragState {
 }
 
 pub fn setup(app: &AppHandle) -> tauri::Result<()> {
-    WebviewWindowBuilder::new(
+    let window = WebviewWindowBuilder::new(
         app,
         "shake-shelf",
         WebviewUrl::App("index.html?shelf=1".into()),
@@ -110,6 +112,7 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
     .skip_taskbar(true)
     .visible(false)
     .build()?;
+    configure_native_window(&window)?;
 
     let state = Arc::new(Mutex::new(DragState::default()));
     let event_app = app.clone();
@@ -118,6 +121,17 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
 
     let polling_app = app.clone();
     thread::spawn(move || poll_drag_position(polling_app, state));
+    Ok(())
+}
+
+fn configure_native_window(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+    let window_ptr = window.ns_window()?;
+    let native_window = unsafe { &*(window_ptr.cast::<NSWindow>()) };
+    let behavior = native_window.collectionBehavior()
+        | NSWindowCollectionBehavior::CanJoinAllSpaces
+        | NSWindowCollectionBehavior::FullScreenAuxiliary;
+    native_window.setCollectionBehavior(behavior);
+    native_window.setLevel(NSFloatingWindowLevel);
     Ok(())
 }
 
@@ -271,13 +285,20 @@ pub fn show_for_test(app: &AppHandle) -> Result<(), String> {
         .get_webview_window("shake-shelf")
         .ok_or_else(|| "shake shelf window is unavailable".to_string())?;
     window.center().map_err(|error| error.to_string())?;
-    window.show().map_err(|error| error.to_string())
+    show_window(&window)
 }
 
 pub fn hide(app: &AppHandle) -> Result<(), String> {
     app.get_webview_window("shake-shelf")
         .ok_or_else(|| "shake shelf window is unavailable".to_string())?
         .hide()
+        .map_err(|error| error.to_string())
+}
+
+pub fn start_dragging(app: &AppHandle) -> Result<(), String> {
+    app.get_webview_window("shake-shelf")
+        .ok_or_else(|| "shake shelf window is unavailable".to_string())?
+        .start_dragging()
         .map_err(|error| error.to_string())
 }
 
@@ -361,6 +382,20 @@ fn show_shelf(app: &AppHandle, x: f64, y: f64) {
         let _ = window.set_position(LogicalPosition::new(x - 180.0, y + 24.0));
         let _ = window.set_always_on_top(true);
         let _ = window.set_visible_on_all_workspaces(true);
-        let _ = window.show();
+        let _ = show_window(&window);
     }
+}
+
+fn show_window(window: &tauri::WebviewWindow) -> Result<(), String> {
+    window.show().map_err(|error| error.to_string())?;
+
+    let callback_window = window.clone();
+    window
+        .run_on_main_thread(move || {
+            if let Ok(window_ptr) = callback_window.ns_window() {
+                let native_window = unsafe { &*(window_ptr.cast::<NSWindow>()) };
+                native_window.orderFrontRegardless();
+            }
+        })
+        .map_err(|error| error.to_string())
 }

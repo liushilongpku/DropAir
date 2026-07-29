@@ -132,6 +132,15 @@ fn hide_shake_shelf(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn start_shake_shelf_drag(app: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    return shake_shelf::start_dragging(&app);
+
+    #[cfg(not(target_os = "macos"))]
+    Err("shake shelf is currently available only on macOS".to_string())
+}
+
+#[tauri::command]
 async fn begin_native_file_drag(path: String, app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
@@ -198,6 +207,7 @@ pub fn run() {
             shake_monitor_diagnostics,
             show_shake_shelf_for_test,
             hide_shake_shelf,
+            start_shake_shelf_drag,
             begin_native_file_drag
         ])
         .run(tauri::generate_context!())

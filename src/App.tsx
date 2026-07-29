@@ -209,6 +209,12 @@ function App() {
     }
   }
 
+  function startShakeShelfDrag() {
+    void invoke("start_shake_shelf_drag").catch((error) => {
+      setStatus(toErrorMessage(error));
+    });
+  }
+
   function beginNativeFileDrag(event: DragEvent<HTMLElement>, path: string) {
     event.preventDefault();
     void invoke("begin_native_file_drag", { path }).catch((error) => {
@@ -248,7 +254,9 @@ function App() {
         onDrop={handleDrop}
       >
         <div className="shake-shelf-topline">
-          <span>DropAir Shelf</span>
+          <span className="shake-shelf-drag-handle" onMouseDown={startShakeShelfDrag}>
+            DropAir Shelf
+          </span>
           <div className="shake-shelf-actions">
             <span>{items.length} queued</span>
             <button
@@ -278,6 +286,18 @@ function App() {
               >
                 {item.kind === "directory" ? <Folder size={16} /> : <FileText size={16} />}
                 <span>{item.name}</span>
+                <button
+                  className="shake-shelf-remove"
+                  type="button"
+                  draggable={false}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onDragStart={(event) => event.stopPropagation()}
+                  onClick={() => void removeItem(item.id)}
+                  title={`Remove ${item.name}`}
+                  aria-label={`Remove ${item.name}`}
+                >
+                  <X size={14} />
+                </button>
               </div>
             ))}
           </div>

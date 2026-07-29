@@ -59,6 +59,15 @@ button {
   gap: 8px;
 }
 
+.shake-shelf-drag-handle {
+  align-self: stretch;
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  cursor: move;
+  user-select: none;
+}
+
 .shake-shelf-close {
   display: inline-flex;
   align-items: center;
@@ -114,6 +123,25 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.shake-shelf-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: #698078;
+  background: transparent;
+}
+
+.shake-shelf-remove:hover {
+  color: #873d32;
+  background: #f5e5e2;
 }
 
 .app-shell {
