@@ -6,10 +6,10 @@ use core_graphics::event::{
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use objc2::{rc::Retained, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
-    NSApplication, NSBackingStoreType, NSPanel, NSStatusWindowLevel, NSView, NSWindow,
+    NSApplication, NSBackingStoreType, NSEvent, NSPanel, NSStatusWindowLevel, NSView, NSWindow,
     NSWindowCollectionBehavior, NSWindowStyleMask,
 };
-use objc2_foundation::{NSRect, NSSize, NSString};
+use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 use serde::Serialize;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering};
@@ -17,7 +17,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, LogicalPosition, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 const SHAKE_WINDOW_MS: u128 = 1500;
 const MIN_HORIZONTAL_TRAVEL: f64 = 24.0;
@@ -57,6 +57,13 @@ struct DragState {
     direction_changes: u8,
     window_started: Option<Instant>,
     last_trigger: Option<Instant>,
+}
+
+#[derive(Clone, Copy)]
+enum PanelPlacement {
+    Keep,
+    Pointer,
+    Center,
 }
 
 impl DragState {
@@ -190,7 +197,7 @@ fn keep_shelf_front(app: AppHandle) {
     loop {
         if SHELF_VISIBLE.load(Ordering::Acquire) {
             if let Some(window) = app.get_webview_window("shake-shelf") {
-                let _ = bring_to_front(&window, false);
+                let _ = bring_to_front(&window, PanelPlacement::Keep);
             }
         }
         thread::sleep(Duration::from_millis(250));
@@ -346,8 +353,7 @@ pub fn show_for_test(app: &AppHandle) -> Result<(), String> {
     let window = app
         .get_webview_window("shake-shelf")
         .ok_or_else(|| "shake shelf window is unavailable".to_string())?;
-    window.center().map_err(|error| error.to_string())?;
-    show_window(&window)
+    show_window(&window, PanelPlacement::Center)
 }
 
 pub fn hide(app: &AppHandle) -> Result<(), String> {
@@ -458,42 +464,33 @@ mod tests {
     }
 }
 
-fn show_shelf(app: &AppHandle, x: f64, y: f64) {
+fn show_shelf(app: &AppHandle, _x: f64, _y: f64) {
     if let Some(window) = app.get_webview_window("shake-shelf") {
-        let half_width = window
-            .inner_size()
-            .ok()
-            .and_then(|size| {
-                window
-                    .scale_factor()
-                    .ok()
-                    .map(|scale| size.to_logical::<f64>(scale))
-            })
-            .map_or(75.0, |size| size.width / 2.0);
-        let _ = window.set_position(LogicalPosition::new(x - half_width, y + 24.0));
-        let _ = window.set_visible_on_all_workspaces(true);
-        let _ = show_window(&window);
+        let _ = show_window(&window, PanelPlacement::Pointer);
     }
 }
 
-fn show_window(window: &tauri::WebviewWindow) -> Result<(), String> {
+fn show_window(window: &tauri::WebviewWindow, placement: PanelPlacement) -> Result<(), String> {
     SHELF_VISIBLE.store(true, Ordering::Release);
-    bring_to_front(window, true)
+    bring_to_front(window, placement)
 }
 
-fn bring_to_front(
-    window: &tauri::WebviewWindow,
-    match_source_position: bool,
-) -> Result<(), String> {
-    let callback_window = window.clone();
+fn bring_to_front(window: &tauri::WebviewWindow, placement: PanelPlacement) -> Result<(), String> {
     window
         .run_on_main_thread(move || {
-            if let (Ok(window_ptr), Ok(panel)) = (callback_window.ns_window(), shelf_panel()) {
-                if match_source_position {
-                    let source_window = unsafe { &*(window_ptr.cast::<NSWindow>()) };
-                    panel.setFrameOrigin(source_window.frame().origin);
+            if let Ok(panel) = shelf_panel() {
+                match placement {
+                    PanelPlacement::Keep => {}
+                    PanelPlacement::Pointer => {
+                        let pointer = NSEvent::mouseLocation();
+                        let panel_width = panel.frame().size.width;
+                        panel.setFrameTopLeftPoint(NSPoint::new(
+                            pointer.x - panel_width / 2.0,
+                            pointer.y - 24.0,
+                        ));
+                    }
+                    PanelPlacement::Center => panel.center(),
                 }
-                configure_native_window_handle(panel);
                 panel.orderFrontRegardless();
             }
         })

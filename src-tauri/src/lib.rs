@@ -1,7 +1,7 @@
 use serde::Serialize;
 use std::path::Path;
 use std::sync::Mutex;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 #[cfg(target_os = "macos")]
 mod shake_shelf;
@@ -191,12 +191,21 @@ fn build_shelf_item(id: u64, path: String) -> ShelfItem {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .manage(Mutex::new(AppState::default()))
         .setup(|app| {
             #[cfg(target_os = "macos")]
             shake_shelf::setup(app.handle())?;
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            #[cfg(target_os = "macos")]
+            if window.label() == "main" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             list_shelf_items,
@@ -210,6 +219,16 @@ pub fn run() {
             start_shake_shelf_drag,
             begin_native_file_drag
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running DropAir");
+        .build(tauri::generate_context!())
+        .expect("error while building DropAir");
+
+    app.run(|app, event| {
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Reopen { .. } = event {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }
+    });
 }
