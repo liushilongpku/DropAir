@@ -6,7 +6,7 @@ use core_graphics::event::{
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use objc2::MainThreadMarker;
 use objc2_app_kit::{
-    NSApplication, NSFloatingWindowLevel, NSView, NSWindow, NSWindowCollectionBehavior,
+    NSApplication, NSScreenSaverWindowLevel, NSView, NSWindow, NSWindowCollectionBehavior,
 };
 use objc2_foundation::{NSRect, NSSize, NSString};
 use serde::Serialize;
@@ -103,9 +103,9 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
         WebviewUrl::App("index.html?shelf=1".into()),
     )
     .title("DropAir Shelf")
-    .inner_size(360.0, 156.0)
-    .min_inner_size(300.0, 130.0)
-    .resizable(false)
+    .inner_size(150.0, 130.0)
+    .min_inner_size(150.0, 130.0)
+    .resizable(true)
     .decorations(false)
     .always_on_top(true)
     .visible_on_all_workspaces(true)
@@ -127,12 +127,16 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
 fn configure_native_window(window: &tauri::WebviewWindow) -> tauri::Result<()> {
     let window_ptr = window.ns_window()?;
     let native_window = unsafe { &*(window_ptr.cast::<NSWindow>()) };
+    configure_native_window_handle(native_window);
+    Ok(())
+}
+
+fn configure_native_window_handle(native_window: &NSWindow) {
     let behavior = native_window.collectionBehavior()
         | NSWindowCollectionBehavior::CanJoinAllSpaces
         | NSWindowCollectionBehavior::FullScreenAuxiliary;
     native_window.setCollectionBehavior(behavior);
-    native_window.setLevel(NSFloatingWindowLevel);
-    Ok(())
+    native_window.setLevel(NSScreenSaverWindowLevel - 1);
 }
 
 fn watch_drag_events(app: AppHandle, state: Arc<Mutex<DragState>>) {
@@ -379,8 +383,17 @@ mod tests {
 
 fn show_shelf(app: &AppHandle, x: f64, y: f64) {
     if let Some(window) = app.get_webview_window("shake-shelf") {
-        let _ = window.set_position(LogicalPosition::new(x - 180.0, y + 24.0));
-        let _ = window.set_always_on_top(true);
+        let half_width = window
+            .inner_size()
+            .ok()
+            .and_then(|size| {
+                window
+                    .scale_factor()
+                    .ok()
+                    .map(|scale| size.to_logical::<f64>(scale))
+            })
+            .map_or(75.0, |size| size.width / 2.0);
+        let _ = window.set_position(LogicalPosition::new(x - half_width, y + 24.0));
         let _ = window.set_visible_on_all_workspaces(true);
         let _ = show_window(&window);
     }
@@ -394,6 +407,7 @@ fn show_window(window: &tauri::WebviewWindow) -> Result<(), String> {
         .run_on_main_thread(move || {
             if let Ok(window_ptr) = callback_window.ns_window() {
                 let native_window = unsafe { &*(window_ptr.cast::<NSWindow>()) };
+                configure_native_window_handle(native_window);
                 native_window.orderFrontRegardless();
             }
         })

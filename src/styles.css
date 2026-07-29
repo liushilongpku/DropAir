@@ -20,6 +20,11 @@ body {
   min-height: 100vh;
 }
 
+body.shake-shelf-body {
+  min-width: 150px;
+  min-height: 130px;
+}
+
 button {
   font: inherit;
 }
@@ -142,6 +147,26 @@ button {
 .shake-shelf-remove:hover {
   color: #873d32;
   background: #f5e5e2;
+}
+
+@media (max-width: 220px) {
+  .shake-shelf-topline {
+    padding: 0 8px;
+  }
+
+  .shake-shelf-drag-handle {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .shake-shelf-actions > span {
+    display: none;
+  }
+
+  .shake-shelf-items {
+    padding: 8px;
+  }
 }
 
 .app-shell {

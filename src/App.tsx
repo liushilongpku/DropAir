@@ -18,6 +18,10 @@ import { DragEvent, useEffect, useMemo, useState } from "react";
 
 const isShelfWindow = new URLSearchParams(window.location.search).has("shelf");
 
+if (isShelfWindow) {
+  document.body.classList.add("shake-shelf-body");
+}
+
 type ShelfItemKind = "file" | "directory" | "other";
 
 type ShelfItem = {
