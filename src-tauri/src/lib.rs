@@ -29,6 +29,7 @@ struct AppState {
 struct ShelfItem {
     id: u64,
     path: String,
+    content: Option<String>,
     name: String,
     kind: ShelfItemKind,
     size: Option<u64>,
@@ -39,6 +40,7 @@ struct ShelfItem {
 enum ShelfItemKind {
     File,
     Directory,
+    Text,
     Other,
 }
 
@@ -64,6 +66,33 @@ fn add_shelf_paths(
         state.next_item_id += 1;
         let id = state.next_item_id;
         state.shelf_items.push(build_shelf_item(id, path));
+    }
+
+    let items = state.shelf_items.clone();
+    app.emit("shelf-changed", &items)
+        .map_err(|error| error.to_string())?;
+    Ok(items)
+}
+
+#[tauri::command]
+fn add_shelf_text(
+    text: String,
+    state: tauri::State<'_, Mutex<AppState>>,
+    app: tauri::AppHandle,
+) -> Result<Vec<ShelfItem>, String> {
+    if text.trim().is_empty() {
+        return Err("text is empty".to_string());
+    }
+
+    let mut state = state.lock().map_err(|_| "failed to lock app state")?;
+    if !state
+        .shelf_items
+        .iter()
+        .any(|item| item.content.as_deref() == Some(text.as_str()))
+    {
+        state.next_item_id += 1;
+        let id = state.next_item_id;
+        state.shelf_items.push(build_text_shelf_item(id, text));
     }
 
     let items = state.shelf_items.clone();
@@ -270,11 +299,46 @@ fn build_shelf_item(id: u64, path: String) -> ShelfItem {
     ShelfItem {
         id,
         path,
+        content: None,
         name,
         kind,
         size: metadata
             .filter(|metadata| metadata.is_file())
             .map(|metadata| metadata.len()),
+    }
+}
+
+fn build_text_shelf_item(id: u64, content: String) -> ShelfItem {
+    let normalized = content.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut name = normalized.chars().take(80).collect::<String>();
+    if normalized.chars().count() > 80 {
+        name.push_str("...");
+    }
+    let size = content.len() as u64;
+
+    ShelfItem {
+        id,
+        path: String::new(),
+        content: Some(content),
+        name,
+        kind: ShelfItemKind::Text,
+        size: Some(size),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builds_unicode_text_preview_without_losing_content() {
+        let content = "选中文本 ".repeat(30);
+        let item = build_text_shelf_item(1, content.clone());
+
+        assert!(matches!(item.kind, ShelfItemKind::Text));
+        assert_eq!(item.content.as_deref(), Some(content.as_str()));
+        assert!(item.name.ends_with("..."));
+        assert_eq!(item.name.trim_end_matches("...").chars().count(), 80);
     }
 }
 
@@ -349,6 +413,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_shelf_items,
             add_shelf_paths,
+            add_shelf_text,
             remove_shelf_item,
             clear_shelf,
             autostart_enabled,

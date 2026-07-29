@@ -24,11 +24,12 @@ if (isShelfWindow) {
   document.body.classList.add("shake-shelf-body");
 }
 
-type ShelfItemKind = "file" | "directory" | "other";
+type ShelfItemKind = "file" | "directory" | "text" | "other";
 
 type ShelfItem = {
   id: number;
   path: string;
+  content: string | null;
   name: string;
   kind: ShelfItemKind;
   size: number | null;
@@ -215,6 +216,24 @@ function App() {
     }
   }
 
+  async function addText(text: string) {
+    if (!text.trim()) {
+      setStatus("No readable text found");
+      return;
+    }
+
+    setIsBusy(true);
+    try {
+      const nextItems = await invoke<ShelfItem[]>("add_shelf_text", { text });
+      setItems(nextItems);
+      setStatus("Text added");
+    } catch (error) {
+      setStatus(toErrorMessage(error));
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
   async function removeItem(id: number) {
     setIsBusy(true);
     try {
@@ -330,6 +349,11 @@ function App() {
     });
   }
 
+  function beginTextDrag(event: DragEvent<HTMLElement>, content: string) {
+    event.dataTransfer.effectAllowed = "copy";
+    event.dataTransfer.setData("text/plain", content);
+  }
+
   function handleDragOver(event: DragEvent<HTMLElement>) {
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
@@ -350,7 +374,13 @@ function App() {
       .map((file) => (file as DropAirFile).path || file.webkitRelativePath)
       .filter((path): path is string => Boolean(path));
 
-    void addPaths(paths);
+    if (paths.length > 0) {
+      void addPaths(paths);
+      return;
+    }
+
+    const text = event.dataTransfer.getData("text/plain");
+    void addText(text);
   }
 
   if (isShelfWindow) {
@@ -381,14 +411,20 @@ function App() {
         {items.length === 0 ? (
           <div className="shake-shelf-empty">
             <FileArchive size={24} />
-            <strong>Drop files here</strong>
+            <strong>Drop files or text here</strong>
           </div>
         ) : (
           <div className="shake-shelf-items">
             {items.slice(0, 2).map((item) => (
               <div
-                className={`shake-shelf-item${item.kind === "file" ? " is-file" : ""}`}
+                className={`shake-shelf-item${item.kind === "file" ? " is-file" : ""}${item.kind === "text" ? " is-text" : ""}`}
                 key={item.id}
+                draggable={item.kind === "text"}
+                onDragStart={
+                  item.kind === "text" && item.content
+                    ? (event) => beginTextDrag(event, item.content as string)
+                    : undefined
+                }
                 onMouseDown={
                   item.kind === "file"
                     ? (event) => beginNativeFileDrag(event, item.path)
@@ -517,19 +553,28 @@ function App() {
           {items.length === 0 ? (
             <div className="empty-state">
               <FileArchive size={34} />
-              <strong>Drop files or folders here</strong>
-              <span>Drag while holding the mouse, then shake left and right to reveal Shelf.</span>
+              <strong>Drop files, folders, or text here</strong>
+              <span>Drag an item or selected text, then shake left and right to reveal Shelf.</span>
             </div>
           ) : (
             <div className="item-list">
               {items.map((item) => (
-                <article className="shelf-item" key={item.id}>
+                <article
+                  className={`shelf-item${item.kind === "text" ? " is-text" : ""}`}
+                  key={item.id}
+                  draggable={item.kind === "text"}
+                  onDragStart={
+                    item.kind === "text" && item.content
+                      ? (event) => beginTextDrag(event, item.content as string)
+                      : undefined
+                  }
+                >
                   <div className="item-icon" aria-hidden="true">
                     {item.kind === "directory" ? <Folder size={20} /> : <FileText size={20} />}
                   </div>
                   <div className="item-copy">
                     <strong>{item.name}</strong>
-                    <span>{item.path}</span>
+                    <span>{item.content ?? item.path}</span>
                   </div>
                   <div className="item-meta">
                     <span>{formatSize(item.size)}</span>

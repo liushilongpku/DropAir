@@ -116,11 +116,15 @@ button {
   font-size: 13px;
 }
 
-.shake-shelf-item.is-file {
+.shake-shelf-item.is-file,
+.shake-shelf-item.is-text,
+.shelf-item.is-text {
   cursor: grab;
 }
 
-.shake-shelf-item.is-file:active {
+.shake-shelf-item.is-file:active,
+.shake-shelf-item.is-text:active,
+.shelf-item.is-text:active {
   cursor: grabbing;
 }
 
