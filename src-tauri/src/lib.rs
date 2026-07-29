@@ -96,6 +96,23 @@ fn shake_monitor_status() -> String {
     "unsupported".to_string()
 }
 
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn shake_monitor_diagnostics() -> shake_shelf::ShakeDiagnostics {
+    shake_shelf::diagnostics()
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+fn shake_monitor_diagnostics() -> serde_json::Value {
+    serde_json::json!({
+        "mouseDowns": 0,
+        "dragEvents": 0,
+        "maxDirectionChanges": 0,
+        "triggers": 0
+    })
+}
+
 #[tauri::command]
 fn show_shake_shelf_for_test(app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
@@ -154,6 +171,7 @@ pub fn run() {
             remove_shelf_item,
             clear_shelf,
             shake_monitor_status,
+            shake_monitor_diagnostics,
             show_shake_shelf_for_test
         ])
         .run(tauri::generate_context!())

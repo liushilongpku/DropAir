@@ -53,6 +53,29 @@ button {
   font-weight: 700;
 }
 
+.shake-shelf-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.shake-shelf-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: #477168;
+  background: transparent;
+}
+
+.shake-shelf-close:hover {
+  background: #deebe4;
+}
+
 .shake-shelf-empty {
   display: grid;
   place-content: center;
@@ -214,6 +237,14 @@ button {
 
 .monitor-status.is-permissionRequired .monitor-dot {
   background: #c2672c;
+}
+
+.monitor-diagnostics {
+  padding: 0 10px;
+  color: #7b8984;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  line-height: 1.5;
 }
 
 .spin {

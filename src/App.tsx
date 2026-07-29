@@ -32,12 +32,20 @@ type DropAirFile = File & {
   path?: string;
 };
 
+type ShakeDiagnostics = {
+  mouseDowns: number;
+  dragEvents: number;
+  maxDirectionChanges: number;
+  triggers: number;
+};
+
 function App() {
   const [items, setItems] = useState<ShelfItem[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [status, setStatus] = useState("Ready");
   const [isBusy, setIsBusy] = useState(false);
   const [shakeStatus, setShakeStatus] = useState("starting");
+  const [shakeDiagnostics, setShakeDiagnostics] = useState<ShakeDiagnostics | null>(null);
 
   const totalSize = useMemo(
     () => items.reduce((sum, item) => sum + (item.size ?? 0), 0),
@@ -46,6 +54,17 @@ function App() {
 
   useEffect(() => {
     void refreshShelf();
+  }, []);
+
+  useEffect(() => {
+    const refreshDiagnostics = () => {
+      void invoke<ShakeDiagnostics>("shake_monitor_diagnostics")
+        .then(setShakeDiagnostics)
+        .catch(() => undefined);
+    };
+    refreshDiagnostics();
+    const timer = window.setInterval(refreshDiagnostics, 500);
+    return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -182,6 +201,10 @@ function App() {
     }
   }
 
+  async function hideShakeShelf() {
+    await getCurrentWindow().hide();
+  }
+
   function handleDragOver(event: DragEvent<HTMLElement>) {
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
@@ -215,7 +238,18 @@ function App() {
       >
         <div className="shake-shelf-topline">
           <span>DropAir Shelf</span>
-          <span>{items.length} queued</span>
+          <div className="shake-shelf-actions">
+            <span>{items.length} queued</span>
+            <button
+              className="shake-shelf-close"
+              type="button"
+              onClick={() => void hideShakeShelf()}
+              title="Close Shelf"
+              aria-label="Close Shelf"
+            >
+              <X size={14} />
+            </button>
+          </div>
         </div>
         {items.length === 0 ? (
           <div className="shake-shelf-empty">
@@ -273,6 +307,12 @@ function App() {
           <span className="monitor-dot" aria-hidden="true" />
           <span>{formatShakeStatus(shakeStatus)}</span>
         </div>
+        {shakeDiagnostics && (
+          <div className="monitor-diagnostics">
+            D {shakeDiagnostics.mouseDowns} / Drag {shakeDiagnostics.dragEvents} / Turns{" "}
+            {shakeDiagnostics.maxDirectionChanges} / Trigger {shakeDiagnostics.triggers}
+          </div>
+        )}
       </aside>
 
       <section className="workspace" aria-label="Shelf workspace">

@@ -3,13 +3,14 @@ use core_graphics::event::{
     CGEvent, CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement, CGEventType,
     CallbackResult,
 };
-use std::sync::atomic::{AtomicU8, Ordering};
+use serde::Serialize;
+use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, LogicalPosition, Manager, WebviewUrl, WebviewWindowBuilder};
 
-const SHAKE_WINDOW_MS: u128 = 900;
+const SHAKE_WINDOW_MS: u128 = 1500;
 const MIN_HORIZONTAL_TRAVEL: f64 = 24.0;
 const REQUIRED_DIRECTION_CHANGES: u8 = 3;
 const TRIGGER_COOLDOWN: Duration = Duration::from_secs(2);
@@ -18,6 +19,19 @@ const MONITOR_LISTENING: u8 = 1;
 const MONITOR_PERMISSION_REQUIRED: u8 = 2;
 
 static MONITOR_STATUS: AtomicU8 = AtomicU8::new(MONITOR_STARTING);
+static MOUSE_DOWNS: AtomicU64 = AtomicU64::new(0);
+static DRAG_EVENTS: AtomicU64 = AtomicU64::new(0);
+static MAX_DIRECTION_CHANGES: AtomicU8 = AtomicU8::new(0);
+static TRIGGERS: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShakeDiagnostics {
+    mouse_downs: u64,
+    drag_events: u64,
+    max_direction_changes: u8,
+    triggers: u64,
+}
 
 #[derive(Default)]
 struct DragState {
@@ -131,15 +145,24 @@ fn handle_event(
 
     match event_type {
         CGEventType::LeftMouseDown => {
+            MOUSE_DOWNS.fetch_add(1, Ordering::Relaxed);
             state.is_dragging = true;
             state.reset_motion(None);
             state.window_started = Some(Instant::now());
         }
         CGEventType::LeftMouseUp => state.is_dragging = false,
-        CGEventType::LeftMouseDragged if state.is_dragging => {
+        CGEventType::LeftMouseDragged => {
+            DRAG_EVENTS.fetch_add(1, Ordering::Relaxed);
             let point = event.location();
             let (x, y) = (point.x, point.y);
             let now = Instant::now();
+
+            if !state.is_dragging {
+                state.is_dragging = true;
+                state.reset_motion(Some(x));
+                state.window_started = Some(now);
+            }
+
             let window_expired = state
                 .window_started
                 .is_none_or(|started| now.duration_since(started).as_millis() > SHAKE_WINDOW_MS);
@@ -148,11 +171,15 @@ fn handle_event(
                 state.window_started = Some(now);
             }
 
-            if state.track_horizontal_motion(x)
+            let shake_detected = state.track_horizontal_motion(x);
+            MAX_DIRECTION_CHANGES.fetch_max(state.direction_changes, Ordering::Relaxed);
+
+            if shake_detected
                 && state
                     .last_trigger
                     .is_none_or(|last| now.duration_since(last) >= TRIGGER_COOLDOWN)
             {
+                TRIGGERS.fetch_add(1, Ordering::Relaxed);
                 state.last_trigger = Some(now);
                 state.reset_motion(Some(x));
                 state.window_started = Some(now);
@@ -173,6 +200,15 @@ pub fn monitor_status() -> &'static str {
         MONITOR_LISTENING => "listening",
         MONITOR_PERMISSION_REQUIRED => "permissionRequired",
         _ => "starting",
+    }
+}
+
+pub fn diagnostics() -> ShakeDiagnostics {
+    ShakeDiagnostics {
+        mouse_downs: MOUSE_DOWNS.load(Ordering::Relaxed),
+        drag_events: DRAG_EVENTS.load(Ordering::Relaxed),
+        max_direction_changes: MAX_DIRECTION_CHANGES.load(Ordering::Relaxed),
+        triggers: TRIGGERS.load(Ordering::Relaxed),
     }
 }
 
