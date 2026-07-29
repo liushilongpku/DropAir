@@ -449,6 +449,11 @@ function App() {
                     ? (event) => beginNativeFileDrag(event, item.path)
                     : undefined
                 }
+                onDoubleClick={
+                  item.kind === "directory"
+                    ? () => void openShelfPath(item.path)
+                    : undefined
+                }
               >
                 {item.kind === "directory" ? <Folder size={16} /> : <FileText size={16} />}
                 <span>{item.name}</span>
@@ -458,6 +463,7 @@ function App() {
                   draggable={false}
                   onMouseDown={(event) => event.stopPropagation()}
                   onDragStart={(event) => event.stopPropagation()}
+                  onDoubleClick={(event) => event.stopPropagation()}
                   onClick={() => void removeItem(item.id)}
                   title={`Remove ${item.name}`}
                   aria-label={`Remove ${item.name}`}
