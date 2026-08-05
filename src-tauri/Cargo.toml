@@ -1,7 +1,7 @@
 [package]
 name = "dropair"
 version = "0.1.0"
-description = "DropAir macOS cloud build smoke test"
+description = "DropAir macOS and Windows desktop file shelf"
 authors = ["DropAir"]
 edition = "2021"
 

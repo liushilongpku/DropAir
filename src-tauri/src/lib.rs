@@ -12,6 +12,9 @@ mod settings;
 #[cfg(target_os = "macos")]
 mod shake_shelf;
 
+#[cfg(target_os = "windows")]
+mod windows_shelf;
+
 use settings::{AppSettings, SettingsStore};
 
 const AUTOSTART_ARG: &str = "--autostart";
@@ -23,6 +26,15 @@ struct AppState {
     path: PathBuf,
     next_item_id: u64,
     shelf_items: Vec<ShelfItem>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlatformCapabilities {
+    platform: String,
+    shake_supported: bool,
+    native_file_drag_supported: bool,
+    accessibility_required: bool,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -171,6 +183,33 @@ fn clear_shelf(app: tauri::AppHandle) -> Result<Vec<ShelfItem>, String> {
 }
 
 #[tauri::command]
+fn platform_capabilities() -> PlatformCapabilities {
+    #[cfg(target_os = "macos")]
+    return PlatformCapabilities {
+        platform: "macos".to_string(),
+        shake_supported: true,
+        native_file_drag_supported: true,
+        accessibility_required: true,
+    };
+
+    #[cfg(target_os = "windows")]
+    return PlatformCapabilities {
+        platform: "windows".to_string(),
+        shake_supported: false,
+        native_file_drag_supported: false,
+        accessibility_required: false,
+    };
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    PlatformCapabilities {
+        platform: std::env::consts::OS.to_string(),
+        shake_supported: false,
+        native_file_drag_supported: false,
+        accessibility_required: false,
+    }
+}
+
+#[tauri::command]
 fn autostart_enabled(app: tauri::AppHandle) -> Result<bool, String> {
     app.autolaunch()
         .is_enabled()
@@ -284,7 +323,10 @@ fn show_shake_shelf_for_test(app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     return shake_shelf::show_for_test(&app);
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    return windows_shelf::show_for_test(&app);
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     Err("shake shelf is currently available only on macOS".to_string())
 }
 
@@ -293,7 +335,10 @@ fn hide_shake_shelf(app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     return shake_shelf::hide(&app);
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    return windows_shelf::hide(&app);
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     Err("shake shelf is currently available only on macOS".to_string())
 }
 
@@ -302,7 +347,10 @@ fn start_shake_shelf_drag(app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     return shake_shelf::start_dragging(&app);
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    return windows_shelf::start_dragging(&app);
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     Err("shake shelf is currently available only on macOS".to_string())
 }
 
@@ -311,21 +359,24 @@ fn begin_native_file_drag(path: String, app: tauri::AppHandle) -> Result<(), Str
     #[cfg(target_os = "macos")]
     return shake_shelf::begin_file_drag(&app, path);
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    return windows_shelf::begin_file_drag(&app, path);
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     Err("native file drag is currently available only on macOS".to_string())
 }
 
 #[tauri::command]
 fn open_shelf_path(path: String) -> Result<(), String> {
-    run_macos_open(&path, false)
+    run_platform_open(&path, false)
 }
 
 #[tauri::command]
 fn reveal_shelf_path(path: String) -> Result<(), String> {
-    run_macos_open(&path, true)
+    run_platform_open(&path, true)
 }
 
-fn run_macos_open(path: &str, reveal: bool) -> Result<(), String> {
+fn run_platform_open(path: &str, reveal: bool) -> Result<(), String> {
     if path.trim().is_empty() || !Path::new(path).exists() {
         return Err("the shelf item no longer exists".to_string());
     }
@@ -343,7 +394,25 @@ fn run_macos_open(path: &str, reveal: bool) -> Result<(), String> {
         return Ok(());
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        let mut command = if reveal {
+            let mut command = std::process::Command::new("explorer.exe");
+            command.arg("/select,");
+            command
+        } else {
+            let mut command = std::process::Command::new("cmd");
+            command.args(["/C", "start", ""]);
+            command
+        };
+        command
+            .arg(path)
+            .spawn()
+            .map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     Err("opening shelf items is currently available only on macOS".to_string())
 }
 
@@ -455,6 +524,8 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             TRAY_SHOW_SHELF => {
                 #[cfg(target_os = "macos")]
                 let _ = shake_shelf::show_for_test(app);
+                #[cfg(target_os = "windows")]
+                let _ = windows_shelf::show_for_test(app);
             }
             TRAY_QUIT => app.exit(0),
             _ => {}
@@ -475,7 +546,10 @@ pub fn run() {
                 #[cfg(target_os = "macos")]
                 let _ = shake_shelf::toggle(app);
 
-                #[cfg(not(target_os = "macos"))]
+                #[cfg(target_os = "windows")]
+                let _ = windows_shelf::toggle(app);
+
+                #[cfg(not(any(target_os = "macos", target_os = "windows")))]
                 show_main_window(app);
             }
         })
@@ -506,11 +580,13 @@ pub fn run() {
             app.manage(Mutex::new(settings_store));
             #[cfg(target_os = "macos")]
             shake_shelf::setup(app.handle(), &settings)?;
+            #[cfg(target_os = "windows")]
+            windows_shelf::setup(app.handle()).map_err(std::io::Error::other)?;
             setup_tray(app.handle())?;
             Ok(())
         })
         .on_window_event(|window, event| {
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "windows"))]
             if window.label() == "main" {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
@@ -524,6 +600,7 @@ pub fn run() {
             add_shelf_text,
             remove_shelf_item,
             clear_shelf,
+            platform_capabilities,
             autostart_enabled,
             set_autostart,
             app_settings,

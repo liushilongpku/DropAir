@@ -1,11 +1,11 @@
 # DropAir
 
-DropAir is currently a macOS cloud-build smoke test for a future Dropover-style
-file shelf and transfer app.
+DropAir is a macOS and Windows desktop file shelf for collecting files, folders,
+and selected text before a later transfer step.
 
-The first validation target is deliberately small: GitHub Actions should build a
-Tauri macOS `.app` bundle and upload it as `DropAir.app.zip` without requiring a
-local Mac development environment.
+The first validation target is deliberately small: GitHub Actions should build
+the Tauri macOS `.app` bundle and Windows installers without requiring a local
+Mac or Windows development environment.
 
 ## Validate macOS Cloud Build
 
@@ -35,3 +35,15 @@ produce a macOS `.app` directly.
 npm install
 npm run build
 ```
+
+## Windows Build
+
+The Windows build provides a persistent Shelf window, tray controls, launch at
+login, file/folder/text drop-in, and the global `Ctrl+Shift+Space` Shelf
+shortcut. Windows does not use the macOS shake monitor; use the shortcut or the
+tray menu to show Shelf.
+
+GitHub Actions builds both NSIS and MSI installers with the **Windows Smoke
+Build** workflow. The Windows Shelf uses the WebView drag payload for file
+drag-out, so Explorer support depends on the target application's URI drop
+handling.

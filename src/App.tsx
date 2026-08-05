@@ -52,6 +52,13 @@ type AppSettings = {
   shakeSensitivity: number;
 };
 
+type PlatformCapabilities = {
+  platform: string;
+  shakeSupported: boolean;
+  nativeFileDragSupported: boolean;
+  accessibilityRequired: boolean;
+};
+
 type MainView = "shelf" | "settings";
 
 function App() {
@@ -67,6 +74,10 @@ function App() {
   const [shakeSensitivity, setShakeSensitivityState] = useState(3);
   const [accessibilityAllowed, setAccessibilityAllowed] = useState<boolean | null>(null);
   const [settingsReady, setSettingsReady] = useState(false);
+  const [platformCapabilities, setPlatformCapabilities] =
+    useState<PlatformCapabilities | null>(null);
+  const shakeSupported = platformCapabilities?.shakeSupported ?? true;
+  const isWindows = platformCapabilities?.platform === "windows";
 
   const totalSize = useMemo(
     () => items.reduce((sum, item) => sum + (item.size ?? 0), 0),
@@ -78,17 +89,25 @@ function App() {
   }, []);
 
   useEffect(() => {
+    void invoke<PlatformCapabilities>("platform_capabilities")
+      .then(setPlatformCapabilities)
+      .catch((error) => setStatus(toErrorMessage(error)));
+  }, []);
+
+  useEffect(() => {
     if (isShelfWindow) return;
     const loadSettings = async () => {
       try {
-        const [autostart, appSettings, accessibility] = await Promise.all([
+        const [autostart, appSettings, capabilities, accessibility] = await Promise.all([
           invoke<boolean>("autostart_enabled"),
           invoke<AppSettings>("app_settings"),
+          invoke<PlatformCapabilities>("platform_capabilities"),
           invoke<boolean>("accessibility_permission_status")
         ]);
         setLaunchAtLogin(autostart);
         setShakeEnabledState(appSettings.shakeEnabled);
         setShakeSensitivityState(appSettings.shakeSensitivity);
+        setPlatformCapabilities(capabilities);
         setAccessibilityAllowed(accessibility);
       } catch (error) {
         setStatus(toErrorMessage(error));
@@ -100,7 +119,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (isShelfWindow) return;
+    if (isShelfWindow || !platformCapabilities?.accessibilityRequired) return;
     const refreshAccessibility = () => {
       void invoke<boolean>("accessibility_permission_status")
         .then(setAccessibilityAllowed)
@@ -108,9 +127,15 @@ function App() {
     };
     window.addEventListener("focus", refreshAccessibility);
     return () => window.removeEventListener("focus", refreshAccessibility);
-  }, []);
+  }, [platformCapabilities?.accessibilityRequired]);
 
   useEffect(() => {
+    if (!shakeSupported) {
+      setShakeStatus("unsupported");
+      setShakeDiagnostics(null);
+      return;
+    }
+
     const refreshDiagnostics = () => {
       void invoke<ShakeDiagnostics>("shake_monitor_diagnostics")
         .then(setShakeDiagnostics)
@@ -119,7 +144,7 @@ function App() {
     refreshDiagnostics();
     const timer = window.setInterval(refreshDiagnostics, 500);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [shakeSupported]);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -373,6 +398,13 @@ function App() {
     event.dataTransfer.setData("text/plain", content);
   }
 
+  function beginWindowsFileDrag(event: DragEvent<HTMLElement>, path: string) {
+    event.dataTransfer.effectAllowed = "copy";
+    const fileUrl = pathToFileUrl(path);
+    event.dataTransfer.setData("text/uri-list", fileUrl);
+    event.dataTransfer.setData("text/plain", fileUrl);
+  }
+
   function handleDragOver(event: DragEvent<HTMLElement>) {
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
@@ -438,14 +470,19 @@ function App() {
               <div
                 className={`shake-shelf-item${item.kind === "file" ? " is-file" : ""}${item.kind === "text" ? " is-text" : ""}`}
                 key={item.id}
-                draggable={item.kind === "text"}
+                draggable={
+                  item.kind === "text" ||
+                  (isWindows && item.kind === "file" && !platformCapabilities?.nativeFileDragSupported)
+                }
                 onDragStart={
                   item.kind === "text" && item.content
                     ? (event) => beginTextDrag(event, item.content as string)
-                    : undefined
+                    : isWindows && item.kind === "file"
+                      ? (event) => beginWindowsFileDrag(event, item.path)
+                      : undefined
                 }
                 onMouseDown={
-                  item.kind === "file"
+                  item.kind === "file" && platformCapabilities?.nativeFileDragSupported
                     ? (event) => beginNativeFileDrag(event, item.path)
                     : undefined
                 }
@@ -539,7 +576,7 @@ function App() {
       <section className="workspace" aria-label="Shelf workspace">
         <header className="toolbar">
           <div>
-            <p className="eyebrow">Temporary shelf</p>
+            <p className="eyebrow">{isWindows ? "Windows shelf" : "Temporary shelf"}</p>
             <h1>{items.length} item{items.length === 1 ? "" : "s"}</h1>
           </div>
           <div className="toolbar-actions">
@@ -547,8 +584,8 @@ function App() {
               className="icon-button"
               type="button"
               onClick={() => void testShakeShelf()}
-              title="Test Shake Shelf"
-              aria-label="Test Shake Shelf"
+              title="Show Shelf"
+              aria-label="Show Shelf"
             >
               <PanelTopOpen size={18} />
             </button>
@@ -579,7 +616,11 @@ function App() {
             <div className="empty-state">
               <FileArchive size={34} />
               <strong>Drop files, folders, or text here</strong>
-              <span>Drag an item or selected text, then shake left and right to reveal Shelf.</span>
+              <span>
+                {isWindows
+                  ? "Drag files, folders, or text here. Press Ctrl+Shift+Space to show Shelf."
+                  : "Drag an item or selected text, then shake left and right to reveal Shelf."}
+              </span>
             </div>
           ) : (
             <div className="item-list">
@@ -663,45 +704,57 @@ function App() {
           </header>
 
           <div className="settings-list">
-            <div className="setting-row">
-              <div className="setting-copy">
-                <strong>Shake detection</strong>
-                <span>Reveal Shelf when a dragged item is shaken left and right.</span>
-              </div>
-              <button
-                className={`toggle-control${shakeEnabled ? " is-on" : ""}`}
-                type="button"
-                role="switch"
-                aria-checked={shakeEnabled}
-                aria-label="Shake detection"
-                disabled={!settingsReady || isBusy}
-                onClick={() => void updateShakeEnabled()}
-              >
-                <span />
-              </button>
-            </div>
+            {shakeSupported ? (
+              <>
+                <div className="setting-row">
+                  <div className="setting-copy">
+                    <strong>Shake detection</strong>
+                    <span>Reveal Shelf when a dragged item is shaken left and right.</span>
+                  </div>
+                  <button
+                    className={`toggle-control${shakeEnabled ? " is-on" : ""}`}
+                    type="button"
+                    role="switch"
+                    aria-checked={shakeEnabled}
+                    aria-label="Shake detection"
+                    disabled={!settingsReady || isBusy}
+                    onClick={() => void updateShakeEnabled()}
+                  >
+                    <span />
+                  </button>
+                </div>
 
-            <div className="setting-row">
-              <div className="setting-copy">
-                <strong>Shake sensitivity</strong>
-                <span>Higher values require less horizontal movement.</span>
+                <div className="setting-row">
+                  <div className="setting-copy">
+                    <strong>Shake sensitivity</strong>
+                    <span>Higher values require less horizontal movement.</span>
+                  </div>
+                  <div className={`sensitivity-control${shakeEnabled ? "" : " is-disabled"}`}>
+                    <span>Low</span>
+                    <input
+                      type="range"
+                      min="1"
+                      max="5"
+                      step="1"
+                      value={shakeSensitivity}
+                      aria-label="Shake sensitivity"
+                      disabled={!settingsReady || !shakeEnabled}
+                      onChange={(event) => void updateShakeSensitivity(Number(event.target.value))}
+                    />
+                    <output>{shakeSensitivity}</output>
+                    <span>High</span>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="setting-row">
+                <div className="setting-copy">
+                  <strong>Windows Shelf shortcut</strong>
+                  <span>Use the global shortcut to show or hide Shelf while working in another app.</span>
+                </div>
+                <kbd>Ctrl+Shift+Space</kbd>
               </div>
-              <div className={`sensitivity-control${shakeEnabled ? "" : " is-disabled"}`}>
-                <span>Low</span>
-                <input
-                  type="range"
-                  min="1"
-                  max="5"
-                  step="1"
-                  value={shakeSensitivity}
-                  aria-label="Shake sensitivity"
-                  disabled={!settingsReady || !shakeEnabled}
-                  onChange={(event) => void updateShakeSensitivity(Number(event.target.value))}
-                />
-                <output>{shakeSensitivity}</output>
-                <span>High</span>
-              </div>
-            </div>
+            )}
 
             <div className="setting-row">
               <div className="setting-copy">
@@ -721,7 +774,7 @@ function App() {
               </button>
             </div>
 
-            <div className="setting-row">
+            {shakeSupported && <div className="setting-row">
               <div className="setting-copy permission-copy">
                 <strong>
                   <ShieldCheck size={16} />
@@ -747,7 +800,7 @@ function App() {
                   Open System Settings
                 </button>
               </div>
-            </div>
+            </div>}
           </div>
         </section>
       )}
@@ -778,8 +831,13 @@ function formatShakeStatus(status: string) {
   if (status === "disabled") return "Shake monitor: Disabled";
   if (status === "listening") return "Shake monitor: Listening";
   if (status === "permissionRequired") return "Shake monitor: Permission required";
-  if (status === "unsupported") return "Shake monitor: macOS only";
+  if (status === "unsupported") return "Shelf shortcut: Ctrl+Shift+Space";
   return "Shake monitor: Starting";
+}
+
+function pathToFileUrl(path: string) {
+  const normalized = path.replace(/\\/g, "/");
+  return normalized.startsWith("/") ? `file://${encodeURI(normalized)}` : `file:///${encodeURI(normalized)}`;
 }
 
 export default App;

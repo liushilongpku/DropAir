@@ -29,6 +29,20 @@ button {
   font: inherit;
 }
 
+kbd {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid #d5ddd6;
+  border-radius: 6px;
+  color: #40524c;
+  background: #fafbf9;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .shake-shelf {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
