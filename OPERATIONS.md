@@ -6,8 +6,8 @@
 - What changed: Added a Windows-specific Shelf Webview window, `Ctrl+Shift+Space` visibility toggle, tray integration, Windows path open/reveal commands, platform capability reporting, Windows URI drag payloads, and NSIS/MSI GitHub Actions packaging.
 - Why: Extend the local file shelf from its macOS-first implementation to a usable Windows desktop version while preserving the macOS native shake and drag paths.
 - Result and impact: The shared React UI now hides macOS-only shake/accessibility controls on Windows and keeps persistence, drop-in, item actions, launch-at-login, and single-instance behavior cross-platform.
-- Evidence: `src-tauri/src/windows_shelf.rs`, `.github/workflows/windows-smoke-build.yml`, `npm run build` passed; Windows Rust/build/runtime verification remains pending in GitHub Actions and on Windows.
-- Next direction: Run the Windows Smoke Build and complete the Windows regression checklist in `RUNBOOK.md`, then decide whether Explorer compatibility requires native COM `DoDragDrop` support.
+- Evidence: `src-tauri/src/windows_shelf.rs`, `.github/workflows/windows-smoke-build.yml`, `npm run build` passed; [Windows Smoke Build #6, run 30997498602](https://github.com/liushilongpku/DropAir/actions/runs/30997498602) succeeded and uploaded `DropAir-windows-installers`.
+- Next direction: Install the Windows artifact and complete the Windows regression checklist in `RUNBOOK.md`, then decide whether Explorer compatibility requires native COM `DoDragDrop` support.
 
 ### 2026-07-29 | Native selected-text support
 - What changed: Added text Shelf items and replaced unreliable WebView-only text drops with native macOS Drag Pasteboard capture while preserving file URL handling.

@@ -1,6 +1,6 @@
 # Project Context
 
-Last verified: 2026-08-05 against commit `3bbc3fc` on `main` plus the current uncommitted Windows implementation.
+Last verified: 2026-08-05 against commit `0f4778e` on `main`; Windows Smoke Build #6 succeeded.
 
 ## Purpose And Scope
 

@@ -1,13 +1,13 @@
 # Session Handoff
 
-Last verified: 2026-08-05 against local `main` at `3bbc3fc`; source changes below are uncommitted and the branch remains synchronized with `origin/main`.
+Last verified: 2026-08-05 against local `main` at `0f4778e`; branch is synchronized with `origin/main`.
 
 ## Summary
 
 - DropAir is a functional macOS and Windows temporary Shelf for files, folders, and selected text.
 - The native Shelf, shake trigger, cross-Space/full-screen behavior, drag-in/out, tray lifecycle, autostart, persisted settings, persisted items, scrolling, item actions, and global shortcut are implemented.
-- The current uncommitted change adds a Windows Shelf window, Windows tray/shortcut lifecycle, Windows open/reveal commands, Windows platform capability handling, URI-based file drag-out, and a Windows NSIS/MSI build workflow.
-- macOS behavior remains on the existing native implementation. GitHub's macOS build history is successful, but the new Windows code has not yet been built or run on Windows.
+- The Windows implementation adds a Shelf window, tray/shortcut lifecycle, Windows open/reveal commands, platform capability handling, URI-based file drag-out, and an NSIS/MSI build workflow.
+- GitHub Windows Smoke Build #6 completed successfully after configuring bundle icons; the Windows installer artifact is ready for manual installation testing.
 - Network discovery, pairing, transfer, authentication, encryption, WAN transport, and non-macOS clients remain unimplemented.
 
 ## Evidence
@@ -19,12 +19,13 @@ Last verified: 2026-08-05 against local `main` at `3bbc3fc`; source changes belo
 - Reusable validation and Mac regression procedure: `RUNBOOK.md`.
 - Stable implementation constraints and architecture: `PROJECT_CONTEXT.md`.
 - Current local frontend verification: `npm run build` passed on 2026-08-05.
+- Windows build verification: [Windows Smoke Build #6, run 30997498602](https://github.com/liushilongpku/DropAir/actions/runs/30997498602), successful; artifact `DropAir-windows-installers` (ID `8926945059`).
 - WSL verification: Windows interop and mounted Windows drives are available; Windows `node`, `npm`, `git`, `winget`, and `choco` are present, but Windows `cargo`, `rustc`, `rustup`, and MSVC `cl.exe` are missing.
 
 ## Remaining Risks
 
 - `3bbc3fc` is cloud-build verified but compact-Shelf directory double-click still needs Mac user validation.
-- Windows Rust compilation, installer generation, and runtime interaction testing are still pending; the WSL host can invoke Windows tools, but the Windows Rust/MSVC toolchain must be installed before a local Tauri build can run.
+- Windows runtime interaction testing is still pending; the WSL host can invoke Windows tools, but the Windows Rust/MSVC toolchain is not installed for local Tauri builds.
 - AppKit behavior cannot be executed in the Linux development environment; cross-target checks are compilation evidence only.
 - The app is ad-hoc signed and not notarized, so macOS quarantine handling is still required.
 - Global shortcut registration failure is only written to stderr; the UI does not report conflicts.
@@ -34,8 +35,8 @@ Last verified: 2026-08-05 against local `main` at `3bbc3fc`; source changes belo
 
 ## Next Actions
 
-1. Run the Windows Smoke Build and install the NSIS artifact; execute the Windows regression checklist in `RUNBOOK.md`.
-2. Install the Windows Rust/MSVC toolchain or use the Windows runner, then build the NSIS/MSI artifacts locally or in CI.
-3. Install the MSI artifact and verify install/uninstall behavior plus retained user data.
-4. Install build #25 on macOS and verify directory double-click in the compact Shelf, including that rapid delete clicks do not open the directory.
-5. Implement invalid-path presentation and removal/relink behavior for restored Shelf items.
+1. Download and install the NSIS artifact; execute the Windows regression checklist in `RUNBOOK.md`.
+2. Install the MSI artifact and verify install/uninstall behavior plus retained user data.
+3. Install build #25 on macOS and verify directory double-click in the compact Shelf, including that rapid delete clicks do not open the directory.
+4. Implement invalid-path presentation and removal/relink behavior for restored Shelf items.
+5. Before network code, define the device identity, pairing, authentication, encryption, discovery, and transfer protocol boundaries for LAN and ZeroTier environments.
