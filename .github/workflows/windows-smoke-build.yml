@@ -46,8 +46,14 @@ jobs:
         run: |
           if (Test-Path windows-build.log) {
             $lines = Get-Content windows-build.log
-            $start = [Math]::Max(0, $lines.Count - 80)
-            for ($index = $start; $index -lt $lines.Count; $index++) {
+            $matchingLines = @()
+            for ($index = 0; $index -lt $lines.Count; $index++) {
+              if ($lines[$index] -match '(?i)error|failed|failure|unable|could not|denied|panic|invalid|not found|exit code') {
+                $matchingLines += $index
+              }
+            }
+            $selectedLines = $matchingLines | Select-Object -Last 40
+            foreach ($index in $selectedLines) {
               $message = $lines[$index].Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
               Write-Output "::error file=windows-build.log,line=$($index + 1)::$message"
             }
