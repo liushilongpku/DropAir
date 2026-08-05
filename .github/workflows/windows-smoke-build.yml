@@ -48,7 +48,7 @@ jobs:
             $lines = Get-Content windows-build.log
             $matchingLines = @()
             for ($index = 0; $index -lt $lines.Count; $index++) {
-              if ($lines[$index] -match '(?i)error|failed|failure|unable|could not|denied|panic|invalid|not found|exit code') {
+              if ($lines[$index] -match '(?i)\berror\b|error\[[A-Z0-9]+\]|failed to|failure:|unable to|could not|cannot|denied|panic|invalid|not found|exit code|caused by|process completed') {
                 $matchingLines += $index
               }
             }
