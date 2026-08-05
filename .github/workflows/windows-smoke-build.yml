@@ -28,7 +28,17 @@ jobs:
         run: npm ci
 
       - name: Build Windows installers
-        run: npm run tauri -- build --bundles nsis,msi
+        run: |
+          npm run tauri -- build --bundles nsis,msi --verbose 2>&1 | Tee-Object -FilePath windows-build.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload Windows build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DropAir-windows-build-log
+          path: windows-build.log
+          if-no-files-found: warn
 
       - name: Upload Windows installers
         uses: actions/upload-artifact@v4
