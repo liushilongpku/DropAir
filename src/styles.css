@@ -385,6 +385,20 @@ kbd {
   background: #eef7f2;
 }
 
+.transfer-status-box {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid #dfe5df;
+  border-radius: 8px;
+  color: #52645e;
+  background: #fafbf9;
+  font-size: 13px;
+}
+
+.transfer-status-box .is-warning {
+  color: #8a4b20;
+}
+
 .toolbar,
 .summary-bar,
 .toolbar-actions,

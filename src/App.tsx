@@ -67,6 +67,13 @@ type PeerInfo = {
   lastSeen: number;
 };
 
+type TransferStatusInfo = {
+  udpListenerUp: boolean;
+  tcpListenerUp: boolean;
+  discoveryPort: number;
+  transferPort: number;
+};
+
 type MainView = "shelf" | "devices" | "settings";
 
 function App() {
@@ -84,6 +91,7 @@ function App() {
   const [settingsReady, setSettingsReady] = useState(false);
   const [peers, setPeers] = useState<PeerInfo[]>([]);
   const [selectedPeerId, setSelectedPeerId] = useState<string | null>(null);
+  const [transferStatusInfo, setTransferStatusInfo] = useState<TransferStatusInfo | null>(null);
   const [platformCapabilities, setPlatformCapabilities] =
     useState<PlatformCapabilities | null>(null);
   const shakeSupported = platformCapabilities?.shakeSupported ?? true;
@@ -114,6 +122,9 @@ function App() {
     );
     void invoke<PeerInfo[]>("list_peers")
       .then(setPeers)
+      .catch(() => undefined);
+    void invoke<TransferStatusInfo>("transfer_status")
+      .then(setTransferStatusInfo)
       .catch(() => undefined);
     return () => {
       unlistenPeers?.();
@@ -817,7 +828,8 @@ function App() {
                 <strong>No devices found</strong>
                 <span>
                   Start DropAir on another computer on the same network. Discovery runs in the
-                  background.
+                  background. If receiving fails, allow DropAir through Windows Firewall on private
+                  networks.
                 </span>
               </div>
             ) : (
@@ -850,6 +862,18 @@ function App() {
                   </button>
                 </article>
               ))
+            )}
+          </div>
+          <div className="transfer-status-box">
+            {transferStatusInfo?.tcpListenerUp ? (
+              <span>
+                Receiving on port {transferStatusInfo.transferPort} (listening)
+              </span>
+            ) : (
+              <span className="is-warning">
+                Transfer listener is not running. Allow DropAir through Windows Firewall on private
+                networks, then restart DropAir.
+              </span>
             )}
           </div>
         </section>

@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream, UdpSocket};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -30,6 +31,9 @@ pub struct PeerInfo {
 pub struct PeersState {
     peers: Vec<PeerInfo>,
 }
+
+static UDP_LISTENER_UP: AtomicBool = AtomicBool::new(false);
+static TCP_LISTENER_UP: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -73,8 +77,15 @@ fn now_millis() -> u64 {
 
 fn listen_for_discovery(app: AppHandle) {
     let Ok(socket) = UdpSocket::bind(("0.0.0.0", DISCOVERY_PORT)) else {
+        emit_transfer_error(
+            &app,
+            &format!(
+                "Discovery listener failed: UDP port {DISCOVERY_PORT} is unavailable"
+            ),
+        );
         return;
     };
+    UDP_LISTENER_UP.store(true, Ordering::Relaxed);
     let _ = socket.set_broadcast(true);
     let _ = socket.set_read_timeout(Some(Duration::from_secs(1)));
     let mut buffer = [0u8; 2048];
@@ -169,8 +180,13 @@ fn broadcast_discovery(app: AppHandle) {
 
 fn listen_for_transfers(app: AppHandle) {
     let Ok(listener) = TcpListener::bind(("0.0.0.0", TRANSFER_PORT)) else {
+        emit_transfer_error(
+            &app,
+            &format!("Transfer listener failed: TCP port {TRANSFER_PORT} is unavailable"),
+        );
         return;
     };
+    TCP_LISTENER_UP.store(true, Ordering::Relaxed);
     for connection in listener.incoming() {
         let Ok(stream) = connection else {
             continue;
@@ -268,6 +284,17 @@ fn sanitize_file_name(name: &str) -> String {
     }
 }
 
+fn emit_transfer_error(app: &AppHandle, message: &str) {
+    let _ = app.emit(
+        "transfer-status",
+        serde_json::json!({
+            "peerId": "local",
+            "state": "error",
+            "message": message
+        }),
+    );
+}
+
 #[tauri::command]
 pub fn list_peers(state: tauri::State<'_, Mutex<PeersState>>) -> Vec<PeerInfo> {
     let peers = match state.lock() {
@@ -314,7 +341,11 @@ pub fn send_shelf_items(
 }
 
 fn send_items_to_peer(app: &AppHandle, address: &str, item_ids: &[u64]) -> Result<usize, String> {
-    let mut stream = TcpStream::connect(address).map_err(|error| error.to_string())?;
+    let mut stream = TcpStream::connect(address).map_err(|error| {
+        format!(
+            "Could not connect to {address}: {error}. On Windows, allow DropAir through the firewall for private networks."
+        )
+    })?;
     stream
         .set_read_timeout(Some(SOCKET_TIMEOUT))
         .map_err(|error| error.to_string())?;
@@ -383,6 +414,25 @@ fn send_items_to_peer(app: &AppHandle, address: &str, item_ids: &[u64]) -> Resul
         }
     }
     Ok(sent)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferStatus {
+    pub udp_listener_up: bool,
+    pub tcp_listener_up: bool,
+    pub discovery_port: u16,
+    pub transfer_port: u16,
+}
+
+#[tauri::command]
+pub fn transfer_status() -> TransferStatus {
+    TransferStatus {
+        udp_listener_up: UDP_LISTENER_UP.load(Ordering::Relaxed),
+        tcp_listener_up: TCP_LISTENER_UP.load(Ordering::Relaxed),
+        discovery_port: DISCOVERY_PORT,
+        transfer_port: TRANSFER_PORT,
+    }
 }
 
 #[cfg(test)]

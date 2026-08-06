@@ -72,3 +72,17 @@ Limitations of this preview:
   DropAir on private networks.
 
 Pairing, encryption, and WAN transport are the next milestones.
+
+### Troubleshooting macOS to Windows transfers
+
+If sending from macOS fails with `Connection refused`, the Windows machine is
+not accepting inbound TCP connections on port `47654`. Allow DropAir through
+Windows Defender Firewall for private networks, or add an inbound rule from an
+administrator PowerShell:
+
+```powershell
+netsh advfirewall firewall add rule name="DropAir" dir=in action=allow protocol=TCP localport=47654 profile=private
+netsh advfirewall firewall add rule name="DropAir Discovery" dir=in action=allow protocol=UDP localport=47653 profile=private
+```
+
+The **Devices** page shows whether the transfer listener is running.

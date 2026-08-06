@@ -639,7 +639,8 @@ pub fn run() {
             open_shelf_path,
             reveal_shelf_path,
             transfer::list_peers,
-            transfer::send_shelf_items
+            transfer::send_shelf_items,
+            transfer::transfer_status
         ])
         .build(tauri::generate_context!())
         .expect("error while building DropAir");
