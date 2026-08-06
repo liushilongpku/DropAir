@@ -54,13 +54,14 @@ pub fn setup(app: &AppHandle) -> Result<(), String> {
 
 fn device_identity(app: &AppHandle) -> (String, String) {
     let state = app.state::<Mutex<SettingsStore>>();
-    match state.lock() {
+    let identity = match state.lock() {
         Ok(store) => {
             let settings = store.settings();
             (settings.device_id, settings.device_name)
         }
         Err(_) => ("unknown".to_string(), "DropAir".to_string()),
-    }
+    };
+    identity
 }
 
 fn now_millis() -> u64 {
@@ -269,10 +270,11 @@ fn sanitize_file_name(name: &str) -> String {
 
 #[tauri::command]
 pub fn list_peers(state: tauri::State<'_, Mutex<PeersState>>) -> Vec<PeerInfo> {
-    match state.lock() {
+    let peers = match state.lock() {
         Ok(state) => state.peers.clone(),
         Err(_) => Vec::new(),
-    }
+    };
+    peers
 }
 
 #[tauri::command]
