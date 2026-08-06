@@ -170,6 +170,11 @@ fn create_shelf_panel(
     let content_view = source_window
         .contentView()
         .expect("Tauri shelf window must have a content view");
+    // The Tauri source window is only a view provider for the native panel.
+    // tao's delegate callbacks assume the window always has a content view
+    // and would panic (aborting the app) if a backing-scale change reaches
+    // them after the view is stripped, so detach the delegate first.
+    source_window.setDelegate(None);
     source_window.setContentView(None);
 
     let content_rect = restored_frame
