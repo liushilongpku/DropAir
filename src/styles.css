@@ -104,6 +104,25 @@ kbd {
   background: #deebe4;
 }
 
+.shake-shelf-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: #698078;
+  background: transparent;
+}
+
+.shake-shelf-icon:hover {
+  color: #11645b;
+  background: #deebe4;
+}
+
 .shake-shelf-empty {
   display: grid;
   place-content: center;

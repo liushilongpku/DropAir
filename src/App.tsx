@@ -299,7 +299,16 @@ function App() {
   async function revealShelfPath(path: string) {
     try {
       await invoke("reveal_shelf_path", { path });
-      setStatus("Item revealed in Finder");
+      setStatus(isWindows ? "Item revealed in Explorer" : "Item revealed in Finder");
+    } catch (error) {
+      setStatus(toErrorMessage(error));
+    }
+  }
+
+  async function openMainWindow() {
+    try {
+      await invoke("open_main_window");
+      setStatus("DropAir window opened");
     } catch (error) {
       setStatus(toErrorMessage(error));
     }
@@ -450,6 +459,15 @@ function App() {
           <div className="shake-shelf-actions">
             <span>{items.length} queued</span>
             <button
+              className="shake-shelf-icon"
+              type="button"
+              onClick={() => void openMainWindow()}
+              title="Open DropAir"
+              aria-label="Open DropAir"
+            >
+              <PanelTopOpen size={14} />
+            </button>
+            <button
               className="shake-shelf-close"
               type="button"
               onClick={() => void hideShakeShelf()}
@@ -488,13 +506,43 @@ function App() {
                     : undefined
                 }
                 onDoubleClick={
-                  item.kind === "directory"
+                  item.kind !== "text"
                     ? () => void openShelfPath(item.path)
                     : undefined
                 }
               >
                 {item.kind === "directory" ? <Folder size={16} /> : <FileText size={16} />}
                 <span>{item.name}</span>
+                {item.kind !== "text" && (
+                  <>
+                    <button
+                      className="shake-shelf-icon"
+                      type="button"
+                      title={`Open ${item.name}`}
+                      aria-label={`Open ${item.name}`}
+                      draggable={false}
+                      onMouseDown={(event) => event.stopPropagation()}
+                      onDragStart={(event) => event.stopPropagation()}
+                      onDoubleClick={(event) => event.stopPropagation()}
+                      onClick={() => void openShelfPath(item.path)}
+                    >
+                      <ExternalLink size={13} />
+                    </button>
+                    <button
+                      className="shake-shelf-icon"
+                      type="button"
+                      title={isWindows ? "Show in Explorer" : "Show in Finder"}
+                      aria-label={isWindows ? "Show in Explorer" : "Show in Finder"}
+                      draggable={false}
+                      onMouseDown={(event) => event.stopPropagation()}
+                      onDragStart={(event) => event.stopPropagation()}
+                      onDoubleClick={(event) => event.stopPropagation()}
+                      onClick={() => void revealShelfPath(item.path)}
+                    >
+                      <FolderOpen size={13} />
+                    </button>
+                  </>
+                )}
                 <button
                   className="shake-shelf-remove"
                   type="button"

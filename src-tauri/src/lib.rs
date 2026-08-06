@@ -521,6 +521,12 @@ fn show_main_window(app: &tauri::AppHandle) {
     }
 }
 
+#[tauri::command]
+fn open_main_window(app: tauri::AppHandle) -> Result<(), String> {
+    show_main_window(&app);
+    Ok(())
+}
+
 fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, TRAY_OPEN, "Open DropAir", true, None::<&str>)?;
     let show_shelf = MenuItem::with_id(app, TRAY_SHOW_SHELF, "Show Shelf", true, None::<&str>)?;
@@ -625,6 +631,7 @@ pub fn run() {
             shake_monitor_diagnostics,
             show_shake_shelf_for_test,
             hide_shake_shelf,
+            open_main_window,
             start_shake_shelf_drag,
             begin_native_file_drag,
             open_shelf_path,
