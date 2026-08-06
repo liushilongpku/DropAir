@@ -13,6 +13,8 @@ pub struct AppSettings {
     pub shake_enabled: bool,
     pub shake_sensitivity: u8,
     pub shelf_frame: Option<ShelfFrame>,
+    pub device_id: String,
+    pub device_name: String,
 }
 
 impl Default for AppSettings {
@@ -21,6 +23,8 @@ impl Default for AppSettings {
             shake_enabled: true,
             shake_sensitivity: 3,
             shelf_frame: None,
+            device_id: String::new(),
+            device_name: String::new(),
         }
     }
 }
@@ -64,7 +68,20 @@ impl SettingsStore {
         };
         settings.shake_sensitivity = clamp_sensitivity(settings.shake_sensitivity);
         settings.shelf_frame = settings.shelf_frame.filter(|frame| frame.is_valid());
-        Ok(Self { path, settings })
+        let mut generated_identity = false;
+        if settings.device_id.is_empty() {
+            settings.device_id = generate_device_id();
+            generated_identity = true;
+        }
+        if settings.device_name.is_empty() {
+            settings.device_name = default_device_name();
+            generated_identity = true;
+        }
+        let store = Self { path, settings };
+        if generated_identity {
+            let _ = store.save();
+        }
+        Ok(store)
     }
 
     pub fn settings(&self) -> AppSettings {
@@ -120,6 +137,20 @@ impl SettingsStore {
 
 pub fn clamp_sensitivity(sensitivity: u8) -> u8 {
     sensitivity.clamp(MIN_SENSITIVITY, MAX_SENSITIVITY)
+}
+
+fn generate_device_id() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    format!("{}-{nanos:x}", std::process::id())
+}
+
+fn default_device_name() -> String {
+    std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "DropAir".to_string())
 }
 
 #[cfg(test)]

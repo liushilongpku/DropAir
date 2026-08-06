@@ -363,6 +363,28 @@ kbd {
   padding: 24px;
 }
 
+.devices-list {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.device-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid #dfe5df;
+  border-radius: 8px;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.device-row.is-selected {
+  border-color: #11645b;
+  background: #eef7f2;
+}
+
 .toolbar,
 .summary-bar,
 .toolbar-actions,

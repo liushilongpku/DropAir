@@ -8,6 +8,7 @@ use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 mod settings;
+mod transfer;
 
 #[cfg(target_os = "macos")]
 mod shake_shelf;
@@ -601,6 +602,7 @@ pub fn run() {
             shake_shelf::setup(app.handle(), &settings)?;
             #[cfg(target_os = "windows")]
             windows_shelf::setup(app.handle(), &settings).map_err(std::io::Error::other)?;
+            transfer::setup(app.handle()).map_err(std::io::Error::other)?;
             setup_tray(app.handle())?;
             Ok(())
         })
@@ -635,7 +637,9 @@ pub fn run() {
             start_shake_shelf_drag,
             begin_native_file_drag,
             open_shelf_path,
-            reveal_shelf_path
+            reveal_shelf_path,
+            transfer::list_peers,
+            transfer::send_shelf_items
         ])
         .build(tauri::generate_context!())
         .expect("error while building DropAir");

@@ -47,3 +47,28 @@ GitHub Actions builds both NSIS and MSI installers with the **Windows Smoke
 Build** workflow. The Windows Shelf uses the WebView drag payload for file
 drag-out, so Explorer support depends on the target application's URI drop
 handling.
+
+## LAN Transfer (preview)
+
+DropAir discovers other instances on the same local network and can send Shelf
+files and text between devices:
+
+- Discovery: every instance broadcasts its identity over UDP port `47653`.
+- Transfer: files and text are streamed over TCP port `47654`.
+- Received files and text are stored under DropAir's app data `received`
+  directory and added to the local Shelf automatically.
+
+Open **Devices** in the main window to see discovered devices and send the
+current Shelf items to a selected device. The main toolbar **Send** button uses
+the selected device (or the first device found).
+
+Limitations of this preview:
+
+- Transfers are unencrypted and unauthenticated; use it only on trusted LANs.
+- Directory and "other" Shelf items are skipped; files and text are supported.
+- Discovery uses subnet broadcast, so devices on different subnets or over WAN
+  are not found yet. ZeroTier virtual LAN support is planned.
+- On Windows, the first inbound transfer may trigger a firewall prompt; allow
+  DropAir on private networks.
+
+Pairing, encryption, and WAN transport are the next milestones.

@@ -59,7 +59,15 @@ type PlatformCapabilities = {
   accessibilityRequired: boolean;
 };
 
-type MainView = "shelf" | "settings";
+type PeerInfo = {
+  id: string;
+  name: string;
+  address: string;
+  port: number;
+  lastSeen: number;
+};
+
+type MainView = "shelf" | "devices" | "settings";
 
 function App() {
   const [items, setItems] = useState<ShelfItem[]>([]);
@@ -74,6 +82,8 @@ function App() {
   const [shakeSensitivity, setShakeSensitivityState] = useState(3);
   const [accessibilityAllowed, setAccessibilityAllowed] = useState<boolean | null>(null);
   const [settingsReady, setSettingsReady] = useState(false);
+  const [peers, setPeers] = useState<PeerInfo[]>([]);
+  const [selectedPeerId, setSelectedPeerId] = useState<string | null>(null);
   const [platformCapabilities, setPlatformCapabilities] =
     useState<PlatformCapabilities | null>(null);
   const shakeSupported = platformCapabilities?.shakeSupported ?? true;
@@ -87,6 +97,28 @@ function App() {
 
   useEffect(() => {
     void refreshShelf();
+  }, []);
+
+  useEffect(() => {
+    let unlistenPeers: (() => void) | undefined;
+    let unlistenTransfer: (() => void) | undefined;
+    void listen<PeerInfo[]>("peers-changed", (event) => setPeers(event.payload)).then(
+      (nextUnlisten) => {
+        unlistenPeers = nextUnlisten;
+      }
+    );
+    void listen<{ message: string }>("transfer-status", (event) => setStatus(event.payload.message)).then(
+      (nextUnlisten) => {
+        unlistenTransfer = nextUnlisten;
+      }
+    );
+    void invoke<PeerInfo[]>("list_peers")
+      .then(setPeers)
+      .catch(() => undefined);
+    return () => {
+      unlistenPeers?.();
+      unlistenTransfer?.();
+    };
   }, []);
 
   useEffect(() => {
@@ -311,6 +343,25 @@ function App() {
       setStatus("DropAir window opened");
     } catch (error) {
       setStatus(toErrorMessage(error));
+    }
+  }
+
+  async function sendShelfItems(peerId: string) {
+    const itemIds = items
+      .filter((item) => item.kind !== "directory")
+      .map((item) => item.id);
+    if (itemIds.length === 0) {
+      setStatus("No files or text to send");
+      return;
+    }
+    setIsBusy(true);
+    try {
+      await invoke("send_shelf_items", { peerId, itemIds });
+      setStatus("Transfer started");
+    } catch (error) {
+      setStatus(toErrorMessage(error));
+    } finally {
+      setIsBusy(false);
     }
   }
 
@@ -591,7 +642,11 @@ function App() {
             <FileArchive size={18} />
             Shelf
           </button>
-          <button className="nav-item" type="button" disabled>
+          <button
+            className={`nav-item${mainView === "devices" ? " is-active" : ""}`}
+            type="button"
+            onClick={() => setMainView("devices")}
+          >
             <Laptop size={18} />
             Devices
           </button>
@@ -651,8 +706,12 @@ function App() {
             <button
               className="primary-button"
               type="button"
-              disabled={items.length === 0}
+              disabled={items.length === 0 || peers.length === 0 || isBusy}
               title="Send to device"
+              onClick={() => {
+                const peerId = selectedPeerId ?? peers[0]?.id;
+                if (peerId) void sendShelfItems(peerId);
+              }}
             >
               <Send size={18} />
               Send
@@ -740,9 +799,60 @@ function App() {
         <footer className="summary-bar">
           <span>{items.length} queued</span>
           <span>{formatSize(totalSize)}</span>
-          <span>Direct transfer pending</span>
+          <span>{peers.length > 0 ? "LAN transfer ready" : "Searching for devices"}</span>
         </footer>
       </section>
+      ) : mainView === "devices" ? (
+        <section className="workspace" aria-label="Devices workspace">
+          <header className="toolbar">
+            <div>
+              <p className="eyebrow">LAN</p>
+              <h1>Devices</h1>
+            </div>
+          </header>
+          <div className="devices-list">
+            {peers.length === 0 ? (
+              <div className="empty-state">
+                <Laptop size={34} />
+                <strong>No devices found</strong>
+                <span>
+                  Start DropAir on another computer on the same network. Discovery runs in the
+                  background.
+                </span>
+              </div>
+            ) : (
+              peers.map((peer) => (
+                <article
+                  className={`device-row${selectedPeerId === peer.id ? " is-selected" : ""}`}
+                  key={peer.id}
+                  onClick={() => setSelectedPeerId(peer.id)}
+                >
+                  <div className="item-icon" aria-hidden="true">
+                    <Laptop size={20} />
+                  </div>
+                  <div className="item-copy">
+                    <strong>{peer.name}</strong>
+                    <span>
+                      {peer.address}:{peer.port}
+                    </span>
+                  </div>
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    disabled={items.length === 0 || isBusy}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void sendShelfItems(peer.id);
+                    }}
+                  >
+                    <Send size={16} />
+                    Send items
+                  </button>
+                </article>
+              ))
+            )}
+          </div>
+        </section>
       ) : (
         <section className="workspace settings-workspace" aria-label="Settings">
           <header className="toolbar">
