@@ -78,6 +78,7 @@ function App() {
     useState<PlatformCapabilities | null>(null);
   const shakeSupported = platformCapabilities?.shakeSupported ?? true;
   const isWindows = platformCapabilities?.platform === "windows";
+  const accessibilityRequired = platformCapabilities?.accessibilityRequired ?? false;
 
   const totalSize = useMemo(
     () => items.reduce((sum, item) => sum + (item.size ?? 0), 0),
@@ -618,7 +619,7 @@ function App() {
               <strong>Drop files, folders, or text here</strong>
               <span>
                 {isWindows
-                  ? "Drag files, folders, or text here. Press Ctrl+Shift+Space to show Shelf."
+                  ? "Drag files, folders, or text, then shake left and right (or press Ctrl+Shift+Space) to show Shelf."
                   : "Drag an item or selected text, then shake left and right to reveal Shelf."}
               </span>
             </div>
@@ -704,7 +705,7 @@ function App() {
           </header>
 
           <div className="settings-list">
-            {shakeSupported ? (
+            {shakeSupported && (
               <>
                 <div className="setting-row">
                   <div className="setting-copy">
@@ -746,7 +747,9 @@ function App() {
                   </div>
                 </div>
               </>
-            ) : (
+            )}
+
+            {isWindows && (
               <div className="setting-row">
                 <div className="setting-copy">
                   <strong>Windows Shelf shortcut</strong>
@@ -774,7 +777,7 @@ function App() {
               </button>
             </div>
 
-            {shakeSupported && <div className="setting-row">
+            {accessibilityRequired && <div className="setting-row">
               <div className="setting-copy permission-copy">
                 <strong>
                   <ShieldCheck size={16} />

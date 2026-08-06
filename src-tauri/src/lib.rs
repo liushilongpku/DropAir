@@ -195,7 +195,7 @@ fn platform_capabilities() -> PlatformCapabilities {
     #[cfg(target_os = "windows")]
     return PlatformCapabilities {
         platform: "windows".to_string(),
-        shake_supported: false,
+        shake_supported: true,
         native_file_drag_supported: false,
         accessibility_required: false,
     };
@@ -245,6 +245,8 @@ fn set_shake_enabled(
         .set_shake_enabled(enabled)?;
     #[cfg(target_os = "macos")]
     shake_shelf::set_enabled(&app, settings.shake_enabled);
+    #[cfg(target_os = "windows")]
+    windows_shelf::set_enabled(&app, settings.shake_enabled);
     Ok(settings)
 }
 
@@ -259,6 +261,8 @@ fn set_shake_sensitivity(
         .set_shake_sensitivity(sensitivity)?;
     #[cfg(target_os = "macos")]
     shake_shelf::set_sensitivity(settings.shake_sensitivity);
+    #[cfg(target_os = "windows")]
+    windows_shelf::set_sensitivity(settings.shake_sensitivity);
     Ok(settings)
 }
 
@@ -297,7 +301,10 @@ fn shake_monitor_status() -> String {
     #[cfg(target_os = "macos")]
     return shake_shelf::monitor_status().to_string();
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    return windows_shelf::monitor_status().to_string();
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     "unsupported".to_string()
 }
 
@@ -307,7 +314,13 @@ fn shake_monitor_diagnostics() -> shake_shelf::ShakeDiagnostics {
     shake_shelf::diagnostics()
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn shake_monitor_diagnostics() -> windows_shelf::ShakeDiagnostics {
+    windows_shelf::diagnostics()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 #[tauri::command]
 fn shake_monitor_diagnostics() -> serde_json::Value {
     serde_json::json!({
@@ -581,7 +594,7 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             shake_shelf::setup(app.handle(), &settings)?;
             #[cfg(target_os = "windows")]
-            windows_shelf::setup(app.handle()).map_err(std::io::Error::other)?;
+            windows_shelf::setup(app.handle(), &settings).map_err(std::io::Error::other)?;
             setup_tray(app.handle())?;
             Ok(())
         })

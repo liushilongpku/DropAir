@@ -39,9 +39,9 @@ npm run build
 ## Windows Build
 
 The Windows build provides a persistent Shelf window, tray controls, launch at
-login, file/folder/text drop-in, and the global `Ctrl+Shift+Space` Shelf
-shortcut. Windows does not use the macOS shake monitor; use the shortcut or the
-tray menu to show Shelf.
+login, file/folder/text drop-in, horizontal-shake detection, and the global
+`Ctrl+Shift+Space` Shelf shortcut. Hold the left button and shake the mouse
+horizontally to show Shelf, or use the shortcut or the tray menu.
 
 GitHub Actions builds both NSIS and MSI installers with the **Windows Smoke
 Build** workflow. The Windows Shelf uses the WebView drag payload for file
