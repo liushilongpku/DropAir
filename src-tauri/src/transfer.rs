@@ -41,14 +41,14 @@ struct TransferHeader {
 
 pub fn setup(app: &AppHandle) -> Result<(), String> {
     app.manage(Mutex::new(PeersState::default()));
-    let app = app.clone();
-    thread::spawn(move || listen_for_discovery(app));
+    let discovery_app = app.clone();
+    thread::spawn(move || listen_for_discovery(discovery_app));
 
-    let app = app.clone();
-    thread::spawn(move || broadcast_discovery(app));
+    let broadcast_app = app.clone();
+    thread::spawn(move || broadcast_discovery(broadcast_app));
 
-    let app = app.clone();
-    thread::spawn(move || listen_for_transfers(app));
+    let transfer_app = app.clone();
+    thread::spawn(move || listen_for_transfers(transfer_app));
     Ok(())
 }
 
@@ -75,7 +75,6 @@ fn listen_for_discovery(app: AppHandle) {
         return;
     };
     let _ = socket.set_broadcast(true);
-    let _ = socket.set_reuse_address(true);
     let _ = socket.set_read_timeout(Some(Duration::from_secs(1)));
     let mut buffer = [0u8; 2048];
     loop {
@@ -158,7 +157,6 @@ fn broadcast_discovery(app: AppHandle) {
         return;
     };
     let _ = socket.set_broadcast(true);
-    let _ = socket.set_reuse_address(true);
     loop {
         let (id, name) = device_identity(&app);
         let message = format!("{DISCOVERY_PREFIX}{id}|{name}|{TRANSFER_PORT}");

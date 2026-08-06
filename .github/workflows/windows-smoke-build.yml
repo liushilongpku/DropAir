@@ -54,8 +54,11 @@ jobs:
             }
             $selectedLines = $matchingLines | Select-Object -Last 40
             foreach ($index in $selectedLines) {
-              $message = $lines[$index].Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
-              Write-Output "::error file=windows-build.log,line=$($index + 1)::$message"
+              $end = [Math]::Min($lines.Count - 1, $index + 6)
+              for ($line = $index; $line -le $end; $line++) {
+                $message = $lines[$line].Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+                Write-Output "::error file=windows-build.log,line=$($line + 1)::$message"
+              }
             }
           }
 
