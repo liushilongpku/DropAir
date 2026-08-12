@@ -9,7 +9,7 @@ use objc2::{rc::Retained, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
     NSApplication, NSBackingStoreType, NSEvent, NSEventType, NSPanel, NSPasteboard,
     NSPasteboardNameDrag, NSPasteboardTypeFileURL, NSPasteboardTypeString, NSStatusWindowLevel,
-    NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
+    NSView, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
 };
 use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 use serde::Serialize;
@@ -170,12 +170,19 @@ fn create_shelf_panel(
     let content_view = source_window
         .contentView()
         .expect("Tauri shelf window must have a content view");
+    let placeholder_view = unsafe {
+        NSView::initWithFrame(
+            NSView::alloc(marker),
+            NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1.0, 1.0)),
+        )
+    };
     // The Tauri source window is only a view provider for the native panel.
     // tao's delegate callbacks assume the window always has a content view
     // and would panic (aborting the app) if a backing-scale change reaches
-    // them after the view is stripped, so detach the delegate first.
+    // them after the view is stripped. Detach the delegate and leave a
+    // placeholder content view behind as a second layer of protection.
     source_window.setDelegate(None);
-    source_window.setContentView(None);
+    source_window.setContentView(Some(&placeholder_view));
 
     let content_rect = restored_frame
         .filter(|frame| frame.is_valid())
