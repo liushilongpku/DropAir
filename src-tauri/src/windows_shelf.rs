@@ -11,6 +11,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
 const SHELF_LABEL: &str = "shake-shelf";
 const SHAKE_WINDOW_MS: u128 = 1500;
 const TRIGGER_COOLDOWN: Duration = Duration::from_secs(2);
+const DRAG_ARM_DISTANCE: i32 = 24;
 const MONITOR_STARTING: u8 = 0;
 const MONITOR_LISTENING: u8 = 1;
 
@@ -34,6 +35,8 @@ pub struct ShakeDiagnostics {
 #[derive(Default)]
 struct DragState {
     is_dragging: bool,
+    down_x: Option<i32>,
+    drag_armed: bool,
     horizontal_extreme_x: Option<i32>,
     direction: i8,
     direction_changes: u8,
@@ -163,15 +166,21 @@ fn watch_mouse(app: AppHandle) {
         }
 
         if button_is_down {
+            let mut point = POINT { x: 0, y: 0 };
             if !button_was_down {
                 MOUSE_DOWNS.fetch_add(1, Ordering::Relaxed);
+                state.drag_armed = false;
             }
-            let mut point = POINT { x: 0, y: 0 };
             if unsafe { GetCursorPos(&mut point) } != 0 {
+                if !button_was_down {
+                    state.down_x = Some(point.x);
+                }
                 process_drag_position(&app, &mut state, point.x);
             }
         } else {
             state.is_dragging = false;
+            state.down_x = None;
+            state.drag_armed = false;
             state.reset_motion(None);
         }
 
@@ -196,6 +205,17 @@ fn process_drag_position(app: &AppHandle, state: &mut DragState, x: i32) {
 
     if !state.is_dragging {
         state.is_dragging = true;
+        state.reset_motion(Some(x));
+        state.window_started = Some(now);
+    }
+
+    if !state.drag_armed {
+        if let Some(down_x) = state.down_x {
+            if (x - down_x).abs() < DRAG_ARM_DISTANCE {
+                return;
+            }
+        }
+        state.drag_armed = true;
         state.reset_motion(Some(x));
         state.window_started = Some(now);
     }

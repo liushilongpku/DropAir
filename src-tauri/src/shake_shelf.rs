@@ -410,6 +410,13 @@ fn process_drag_position(app: &AppHandle, state_ref: &Arc<Mutex<DragState>>, x: 
             .last_trigger
             .is_none_or(|last| now.duration_since(last) >= TRIGGER_COOLDOWN)
     {
+        if !is_dragging_content() {
+            // Only reveal Shelf when the user is actually dragging a file or
+            // selected text; reset so a later real drag starts a fresh shake.
+            state.reset_motion(Some(x));
+            state.window_started = Some(now);
+            return;
+        }
         TRIGGERS.fetch_add(1, Ordering::Relaxed);
         state.last_trigger = Some(now);
         state.reset_motion(Some(x));
@@ -418,6 +425,14 @@ fn process_drag_position(app: &AppHandle, state_ref: &Arc<Mutex<DragState>>, x: 
             let _ = crate::add_shelf_text_to_app(app, text);
         }
         show_shelf(app, x, y);
+    }
+}
+
+fn is_dragging_content() -> bool {
+    unsafe {
+        let pasteboard = NSPasteboard::pasteboardWithName(NSPasteboardNameDrag);
+        pasteboard.stringForType(NSPasteboardTypeFileURL).is_some()
+            || pasteboard.stringForType(NSPasteboardTypeString).is_some()
     }
 }
 
