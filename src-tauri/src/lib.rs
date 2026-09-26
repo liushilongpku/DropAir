@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{atomic::{AtomicBool, Ordering}, Mutex};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager};
@@ -22,6 +22,9 @@ const AUTOSTART_ARG: &str = "--autostart";
 const TRAY_OPEN: &str = "open";
 const TRAY_SHOW_SHELF: &str = "show-shelf";
 const TRAY_QUIT: &str = "quit";
+
+// Keep the background app alive until the user explicitly chooses Quit.
+static ALLOW_EXIT: AtomicBool = AtomicBool::new(false);
 
 struct AppState {
     path: PathBuf,
@@ -547,7 +550,10 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
                 #[cfg(target_os = "windows")]
                 let _ = windows_shelf::show_for_test(app);
             }
-            TRAY_QUIT => app.exit(0),
+            TRAY_QUIT => {
+                ALLOW_EXIT.store(true, Ordering::Release);
+                app.exit(0);
+            }
             _ => {}
         });
     if let Some(icon) = app.default_window_icon() {
@@ -607,12 +613,9 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            #[cfg(any(target_os = "macos", target_os = "windows"))]
-            if window.label() == "main" {
-                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                    api.prevent_close();
-                    let _ = window.hide();
-                }
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -646,6 +649,12 @@ pub fn run() {
         .expect("error while building DropAir");
 
     app.run(move |app, event| {
+        if let tauri::RunEvent::ExitRequested { api, .. } = &event {
+            if !ALLOW_EXIT.load(Ordering::Acquire) {
+                api.prevent_exit();
+            }
+        }
+
         if matches!(event, tauri::RunEvent::Ready) && !launched_from_autostart {
             show_main_window(app);
         }
