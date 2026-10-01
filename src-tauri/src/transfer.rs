@@ -1,7 +1,7 @@
 use crate::settings::SettingsStore;
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{TcpListener, TcpStream, UdpSocket};
+use std::net::{SocketAddr, TcpListener, TcpStream, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -30,9 +30,11 @@ pub struct PeerInfo {
 #[derive(Default)]
 pub struct PeersState {
     peers: Vec<PeerInfo>,
+    last_error: Option<String>,
 }
 
 static UDP_LISTENER_UP: AtomicBool = AtomicBool::new(false);
+static DISCOVERY_BROADCAST_UP: AtomicBool = AtomicBool::new(false);
 static TCP_LISTENER_UP: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -97,7 +99,16 @@ fn listen_for_discovery(app: AppHandle) {
                 };
                 handle_discovery_message(&app, message, source.ip().to_string());
             }
-            Err(_) => {}
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                ) => {}
+            Err(error) => {
+                emit_transfer_error(&app, &format!("Discovery listener error: {error}"));
+                UDP_LISTENER_UP.store(false, Ordering::Relaxed);
+                break;
+            }
         }
         prune_stale_peers(&app);
     }
@@ -166,14 +177,28 @@ fn prune_stale_peers(app: &AppHandle) {
 
 fn broadcast_discovery(app: AppHandle) {
     let Ok(socket) = UdpSocket::bind(("0.0.0.0", 0)) else {
+        record_transfer_error(&app, "Discovery broadcast could not open a UDP socket");
         return;
     };
     let _ = socket.set_broadcast(true);
     loop {
         let (id, name) = device_identity(&app);
         let message = format!("{DISCOVERY_PREFIX}{id}|{name}|{TRANSFER_PORT}");
-        let _ = socket.send_to(message.as_bytes(), ("255.255.255.255", DISCOVERY_PORT));
-        let _ = socket.send_to(message.as_bytes(), ("127.0.0.1", DISCOVERY_PORT));
+        let broadcast_ok = match socket.send_to(message.as_bytes(), ("255.255.255.255", DISCOVERY_PORT)) {
+            Ok(_) => true,
+            Err(error) => {
+                record_transfer_error(&app, &format!("Discovery broadcast failed: {error}"));
+                false
+            }
+        };
+        let local_broadcast_ok = match socket.send_to(message.as_bytes(), ("127.0.0.1", DISCOVERY_PORT)) {
+            Ok(_) => true,
+            Err(error) => {
+                record_transfer_error(&app, &format!("Local discovery broadcast failed: {error}"));
+                false
+            }
+        };
+        DISCOVERY_BROADCAST_UP.store(broadcast_ok && local_broadcast_ok, Ordering::Relaxed);
         thread::sleep(DISCOVERY_INTERVAL);
     }
 }
@@ -188,13 +213,21 @@ fn listen_for_transfers(app: AppHandle) {
     };
     TCP_LISTENER_UP.store(true, Ordering::Relaxed);
     for connection in listener.incoming() {
-        let Ok(stream) = connection else {
-            continue;
-        };
-        let app = app.clone();
-        thread::spawn(move || {
-            let _ = handle_incoming_transfer(&app, stream);
-        });
+        match connection {
+            Ok(stream) => {
+                let app = app.clone();
+                thread::spawn(move || {
+                    if let Err(error) = handle_incoming_transfer(&app, stream) {
+                        emit_transfer_error(&app, &format!("Incoming transfer failed: {error}"));
+                    }
+                });
+            }
+            Err(error) => {
+                emit_transfer_error(&app, &format!("Transfer listener error: {error}"));
+                TCP_LISTENER_UP.store(false, Ordering::Relaxed);
+                break;
+            }
+        }
     }
 }
 
@@ -285,6 +318,7 @@ fn sanitize_file_name(name: &str) -> String {
 }
 
 fn emit_transfer_error(app: &AppHandle, message: &str) {
+    record_transfer_error(app, message);
     let _ = app.emit(
         "transfer-status",
         serde_json::json!({
@@ -293,6 +327,14 @@ fn emit_transfer_error(app: &AppHandle, message: &str) {
             "message": message
         }),
     );
+}
+
+fn record_transfer_error(app: &AppHandle, message: &str) {
+    eprintln!("DropAir transfer: {message}");
+    let state = app.state::<Mutex<PeersState>>();
+    if let Ok(mut state) = state.lock() {
+        state.last_error = Some(message.to_string());
+    }
 }
 
 #[tauri::command]
@@ -324,6 +366,9 @@ pub fn send_shelf_items(
     let app = app.clone();
     thread::spawn(move || {
         let result = send_items_to_peer(&app, &address, &item_ids);
+        if let Err(error) = &result {
+            record_transfer_error(&app, &format!("Transfer failed: {error}"));
+        }
         let message = match &result {
             Ok(sent) => format!("Sent {sent} item(s)"),
             Err(error) => format!("Transfer failed: {error}"),
@@ -420,6 +465,7 @@ fn send_items_to_peer(app: &AppHandle, address: &str, item_ids: &[u64]) -> Resul
 #[serde(rename_all = "camelCase")]
 pub struct TransferStatus {
     pub udp_listener_up: bool,
+    pub discovery_broadcast_up: bool,
     pub tcp_listener_up: bool,
     pub discovery_port: u16,
     pub transfer_port: u16,
@@ -429,9 +475,153 @@ pub struct TransferStatus {
 pub fn transfer_status() -> TransferStatus {
     TransferStatus {
         udp_listener_up: UDP_LISTENER_UP.load(Ordering::Relaxed),
+        discovery_broadcast_up: DISCOVERY_BROADCAST_UP.load(Ordering::Relaxed),
         tcp_listener_up: TCP_LISTENER_UP.load(Ordering::Relaxed),
         discovery_port: DISCOVERY_PORT,
         transfer_port: TRANSFER_PORT,
+    }
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferDiagnostics {
+    pub udp_listener_up: bool,
+    pub discovery_broadcast_up: bool,
+    pub tcp_listener_up: bool,
+    pub discovery_port: u16,
+    pub transfer_port: u16,
+    pub peer_count: usize,
+    pub received_directory_writable: bool,
+    pub loopback_tcp_ok: bool,
+    pub last_error: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferCheck {
+    pub id: String,
+    pub label: String,
+    pub ok: bool,
+    pub detail: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferSelfCheck {
+    pub checked_at: u64,
+    pub diagnostics: TransferDiagnostics,
+    pub checks: Vec<TransferCheck>,
+}
+
+fn received_directory_writable(app: &AppHandle) -> bool {
+    let Ok(directory) = received_directory(app) else {
+        return false;
+    };
+    let probe = directory.join(format!(".dropair-self-check-{}", now_millis()));
+    match std::fs::File::create(&probe) {
+        Ok(file) => {
+            drop(file);
+            std::fs::remove_file(probe).is_ok()
+        }
+        Err(_) => false,
+    }
+}
+
+fn transfer_diagnostics(app: &AppHandle) -> TransferDiagnostics {
+    let (peer_count, last_error) = app
+        .state::<Mutex<PeersState>>()
+        .lock()
+        .map(|state| (state.peers.len(), state.last_error.clone()))
+        .unwrap_or((0, Some("Could not read transfer state".to_string())));
+    let tcp_listener_up = TCP_LISTENER_UP.load(Ordering::Relaxed);
+    let loopback_tcp_ok = tcp_listener_up
+        && format!("127.0.0.1:{TRANSFER_PORT}")
+            .parse::<SocketAddr>()
+            .ok()
+            .and_then(|address| TcpStream::connect_timeout(&address, Duration::from_millis(500)).ok())
+            .is_some();
+    TransferDiagnostics {
+        udp_listener_up: UDP_LISTENER_UP.load(Ordering::Relaxed),
+        discovery_broadcast_up: DISCOVERY_BROADCAST_UP.load(Ordering::Relaxed),
+        tcp_listener_up,
+        discovery_port: DISCOVERY_PORT,
+        transfer_port: TRANSFER_PORT,
+        peer_count,
+        received_directory_writable: received_directory_writable(app),
+        loopback_tcp_ok,
+        last_error,
+    }
+}
+
+#[tauri::command]
+pub fn transfer_self_check(app: tauri::AppHandle) -> TransferSelfCheck {
+    let diagnostics = transfer_diagnostics(&app);
+    let checks = vec![
+        TransferCheck {
+            id: "discovery-listener".to_string(),
+            label: "Discovery listener".to_string(),
+            ok: diagnostics.udp_listener_up,
+            detail: if diagnostics.udp_listener_up {
+                format!("UDP {} is listening", diagnostics.discovery_port)
+            } else {
+                format!("UDP {} is unavailable", diagnostics.discovery_port)
+            },
+        },
+        TransferCheck {
+            id: "discovery-broadcast".to_string(),
+            label: "Discovery broadcast".to_string(),
+            ok: diagnostics.discovery_broadcast_up,
+            detail: if diagnostics.discovery_broadcast_up {
+                format!("UDP discovery announcements are being sent on port {}", diagnostics.discovery_port)
+            } else {
+                "UDP discovery announcements could not be sent".to_string()
+            },
+        },
+        TransferCheck {
+            id: "transfer-listener".to_string(),
+            label: "Transfer listener".to_string(),
+            ok: diagnostics.tcp_listener_up,
+            detail: if diagnostics.tcp_listener_up {
+                format!("TCP {} is listening", diagnostics.transfer_port)
+            } else {
+                format!("TCP {} is unavailable", diagnostics.transfer_port)
+            },
+        },
+        TransferCheck {
+            id: "loopback-connection".to_string(),
+            label: "Local loopback connection".to_string(),
+            ok: diagnostics.loopback_tcp_ok,
+            detail: if diagnostics.loopback_tcp_ok {
+                "The local transfer service accepts connections".to_string()
+            } else {
+                "The local transfer service is not reachable".to_string()
+            },
+        },
+        TransferCheck {
+            id: "received-directory".to_string(),
+            label: "Received-directory write access".to_string(),
+            ok: diagnostics.received_directory_writable,
+            detail: if diagnostics.received_directory_writable {
+                "The received directory is writable".to_string()
+            } else {
+                "The received directory is missing or not writable".to_string()
+            },
+        },
+        TransferCheck {
+            id: "device-discovery".to_string(),
+            label: "Peer discovery".to_string(),
+            ok: diagnostics.peer_count > 0,
+            detail: if diagnostics.peer_count > 0 {
+                format!("{} DropAir device(s) discovered", diagnostics.peer_count)
+            } else {
+                "No other DropAir device found; check the LAN and firewall".to_string()
+            },
+        },
+    ];
+    TransferSelfCheck {
+        checked_at: now_millis(),
+        diagnostics,
+        checks,
     }
 }
 

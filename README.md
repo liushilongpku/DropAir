@@ -86,3 +86,9 @@ netsh advfirewall firewall add rule name="DropAir Discovery" dir=in action=allow
 ```
 
 The **Devices** page shows whether the transfer listener is running.
+
+The same page also provides **Run self-check**. It checks the UDP discovery
+listener, TCP transfer listener, local TCP loopback connectivity, write access to
+the `received` directory, and whether another DropAir instance has been
+discovered. Recent listener and transfer errors are retained in the diagnostic
+result and are also reported in the application status area.

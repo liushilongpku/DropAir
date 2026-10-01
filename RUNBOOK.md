@@ -84,3 +84,12 @@ Then right-click the application and choose Open.
 7. Delete individual items, clear all items, restart the app, and verify Shelf persistence.
 8. Toggle launch at login, reopen the main window from the tray, and verify single-instance activation.
 9. Install and uninstall the MSI artifact, then verify that the user data directory is not unexpectedly removed.
+
+## LAN Transfer Self-Check
+
+Open **Devices** and run **Run self-check** before testing a transfer. Confirm
+that the UDP discovery and TCP transfer listeners are running, the local loopback
+connection succeeds, and the `received` directory is writable. If no peer is
+discovered, verify that both devices are on the same subnet and that UDP `47653`
+and TCP `47654` are allowed by the firewall. The result also shows the most
+recent listener or transfer error.

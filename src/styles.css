@@ -399,6 +399,64 @@ kbd {
   color: #8a4b20;
 }
 
+.transfer-checks {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #dfe5df;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.transfer-checks-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #40524c;
+  font-size: 13px;
+}
+
+.transfer-checks-header span {
+  color: #7b8984;
+  font-size: 12px;
+}
+
+.transfer-check-list {
+  display: grid;
+  gap: 8px;
+}
+
+.transfer-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: #16806f;
+  font-size: 13px;
+}
+
+.transfer-check.is-failed {
+  color: #b05b2a;
+}
+
+.transfer-check div {
+  display: grid;
+  gap: 2px;
+}
+
+.transfer-check span {
+  color: #63736d;
+  font-size: 12px;
+}
+
+.transfer-last-error {
+  margin: 0;
+  color: #8a4b20;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .toolbar,
 .summary-bar,
 .toolbar-actions,

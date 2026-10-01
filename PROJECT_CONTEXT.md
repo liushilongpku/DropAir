@@ -4,7 +4,7 @@ Last verified: 2026-08-05 against commit `0f4778e` on `main`; Windows Smoke Buil
 
 ## Purpose And Scope
 
-DropAir is a Tauri 2 + React/TypeScript desktop utility that provides a Dropover-style temporary shelf on macOS and Windows. Its current usable scope is local file, directory, and selected-text collection. Device discovery and file transfer are planned but not implemented.
+DropAir is a Tauri 2 + React/TypeScript desktop utility that provides a Dropover-style temporary shelf on macOS and Windows. Its current usable scope includes local file, directory, and selected-text collection plus an unauthenticated LAN transfer preview. The Devices page includes listener and connectivity self-checks.
 
 The development host is Linux/WSL and cannot execute or visually validate AppKit or Windows WebView behavior. macOS `.app` bundles and Windows installers are produced by GitHub Actions and manually tested on their target systems.
 
@@ -16,6 +16,7 @@ The development host is Linux/WSL and cannot execute or visually validate AppKit
 - `src-tauri/src/shake_shelf.rs`: macOS global drag/shake detection, native `NSPanel`, cross-Space/full-screen behavior, native file drag-out, selected-text Drag Pasteboard capture, and Shelf frame persistence.
 - `src-tauri/src/windows_shelf.rs`: Windows hidden Webview Shelf window, global shortcut visibility, tray visibility, and borderless window dragging.
 - `src-tauri/src/settings.rs`: atomic JSON persistence for shake settings and Shelf frame.
+- `src-tauri/src/transfer.rs`: UDP device discovery, TCP file/text transfer, transfer error state, and the Devices-page self-check command.
 - `.github/workflows/macos-smoke-build.yml`: macOS build, ad-hoc signing, ZIP packaging, and artifact upload.
 - `.github/workflows/windows-smoke-build.yml`: Windows NSIS/MSI build and artifact upload.
 

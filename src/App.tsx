@@ -70,9 +70,28 @@ type PeerInfo = {
 
 type TransferStatusInfo = {
   udpListenerUp: boolean;
+  discoveryBroadcastUp: boolean;
   tcpListenerUp: boolean;
   discoveryPort: number;
   transferPort: number;
+};
+
+type TransferCheck = {
+  id: string;
+  label: string;
+  ok: boolean;
+  detail: string;
+};
+
+type TransferSelfCheck = {
+  checkedAt: number;
+  diagnostics: TransferStatusInfo & {
+    peerCount: number;
+    receivedDirectoryWritable: boolean;
+    loopbackTcpOk: boolean;
+    lastError: string | null;
+  };
+  checks: TransferCheck[];
 };
 
 type MainView = "shelf" | "devices" | "settings";
@@ -93,6 +112,8 @@ function App() {
   const [peers, setPeers] = useState<PeerInfo[]>([]);
   const [selectedPeerId, setSelectedPeerId] = useState<string | null>(null);
   const [transferStatusInfo, setTransferStatusInfo] = useState<TransferStatusInfo | null>(null);
+  const [transferSelfCheck, setTransferSelfCheck] = useState<TransferSelfCheck | null>(null);
+  const [isCheckingTransfer, setIsCheckingTransfer] = useState(false);
   const [platformCapabilities, setPlatformCapabilities] =
     useState<PlatformCapabilities | null>(null);
   const shakeSupported = platformCapabilities?.shakeSupported ?? true;
@@ -385,6 +406,21 @@ function App() {
       setStatus(toErrorMessage(error));
     } finally {
       setIsBusy(false);
+    }
+  }
+
+  async function runTransferSelfCheck() {
+    setIsCheckingTransfer(true);
+    try {
+      const result = await invoke<TransferSelfCheck>("transfer_self_check");
+      setTransferSelfCheck(result);
+      setTransferStatusInfo(result.diagnostics);
+      const failed = result.checks.filter((check) => !check.ok).length;
+      setStatus(failed === 0 ? "Transfer self-check passed" : `${failed} transfer checks need attention`);
+    } catch (error) {
+      setStatus(toErrorMessage(error));
+    } finally {
+      setIsCheckingTransfer(false);
     }
   }
 
@@ -842,6 +878,15 @@ function App() {
               <p className="eyebrow">LAN</p>
               <h1>Devices</h1>
             </div>
+            <button
+              className="secondary-button"
+              type="button"
+              disabled={isCheckingTransfer}
+              onClick={() => void runTransferSelfCheck()}
+            >
+              {isCheckingTransfer ? <Loader2 className="spin" size={16} /> : <ShieldCheck size={16} />}
+              Run self-check
+            </button>
           </header>
           <div className="devices-list">
             {peers.length === 0 ? (
@@ -887,17 +932,42 @@ function App() {
             )}
           </div>
           <div className="transfer-status-box">
-            {transferStatusInfo?.tcpListenerUp ? (
+            {transferStatusInfo?.udpListenerUp &&
+            transferStatusInfo.discoveryBroadcastUp &&
+            transferStatusInfo.tcpListenerUp ? (
               <span>
-                Receiving on port {transferStatusInfo.transferPort} (listening)
+                Discovery UDP {transferStatusInfo.discoveryPort} and receiving TCP {transferStatusInfo.transferPort} are listening
               </span>
             ) : (
               <span className="is-warning">
-                Transfer listener is not running. Allow DropAir through Windows Firewall on private
-                networks, then restart DropAir.
+                One or more transfer listeners are not running. Check firewall permissions and restart DropAir.
               </span>
             )}
           </div>
+          {transferSelfCheck && (
+            <div className="transfer-checks" aria-live="polite">
+              <div className="transfer-checks-header">
+                <strong>Self-check results</strong>
+                <span>{new Date(transferSelfCheck.checkedAt).toLocaleTimeString()}</span>
+              </div>
+              <div className="transfer-check-list">
+                {transferSelfCheck.checks.map((check) => (
+                  <div className={`transfer-check${check.ok ? " is-ok" : " is-failed"}`} key={check.id}>
+                    {check.ok ? <CheckCircle2 size={16} /> : <X size={16} />}
+                    <div>
+                      <strong>{check.label}</strong>
+                      <span>{check.detail}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {transferSelfCheck.diagnostics.lastError && (
+                <p className="transfer-last-error">
+                  Recent error: {transferSelfCheck.diagnostics.lastError}
+                </p>
+              )}
+            </div>
+          )}
         </section>
       ) : (
         <section className="workspace settings-workspace" aria-label="Settings">
