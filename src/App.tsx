@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   CheckCircle2,
+  ClipboardPaste,
   ExternalLink,
   FileArchive,
   FileText,
@@ -301,6 +302,17 @@ function App() {
       setStatus(toErrorMessage(error));
     } finally {
       setIsBusy(false);
+    }
+  }
+
+  async function pasteText() {
+    try {
+      if (!navigator.clipboard?.readText) {
+        throw new Error("Clipboard text access is unavailable");
+      }
+      await addText(await navigator.clipboard.readText());
+    } catch (error) {
+      setStatus(toErrorMessage(error));
     }
   }
 
@@ -695,6 +707,16 @@ function App() {
             <h1>{items.length} item{items.length === 1 ? "" : "s"}</h1>
           </div>
           <div className="toolbar-actions">
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => void pasteText()}
+              disabled={isBusy}
+              title="Paste text from clipboard"
+            >
+              <ClipboardPaste size={18} />
+              Paste
+            </button>
             <button
               className="icon-button"
               type="button"
