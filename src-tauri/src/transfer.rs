@@ -344,7 +344,7 @@ fn record_transfer_error(app: &AppHandle, message: &str) {
     let state = app.state::<Mutex<PeersState>>();
     if let Ok(mut state) = state.lock() {
         state.last_error = Some(message.to_string());
-    }
+    };
 }
 
 #[tauri::command]
