@@ -16,7 +16,7 @@ The development host is Linux/WSL and cannot execute or visually validate AppKit
 - `src-tauri/src/shake_shelf.rs`: macOS global drag/shake detection, native `NSPanel`, cross-Space/full-screen behavior, native file drag-out, selected-text Drag Pasteboard capture, and Shelf frame persistence.
 - `src-tauri/src/windows_shelf.rs`: Windows hidden Webview Shelf window, global shortcut visibility, tray visibility, and borderless window dragging.
 - `src-tauri/src/settings.rs`: atomic JSON persistence for shake settings and Shelf frame.
-- `src-tauri/src/transfer.rs`: UDP device discovery, TCP file/text transfer, transfer error state, and the Devices-page self-check command.
+- `src-tauri/src/transfer.rs`: UDP device discovery, active LAN scan, manual peer entries, TCP file/text transfer, transfer error state, and the Devices-page self-check command.
 - `.github/workflows/macos-smoke-build.yml`: macOS build, ad-hoc signing, ZIP packaging, and artifact upload.
 - `.github/workflows/windows-smoke-build.yml`: Windows NSIS/MSI build and artifact upload.
 

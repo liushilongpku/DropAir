@@ -1,7 +1,7 @@
 use crate::settings::SettingsStore;
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream, UdpSocket};
+use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -25,6 +25,7 @@ pub struct PeerInfo {
     pub address: String,
     pub port: u16,
     pub last_seen: u64,
+    pub manual: bool,
 }
 
 #[derive(Default)]
@@ -136,13 +137,20 @@ fn handle_discovery_message(app: &AppHandle, message: &str, address: String) {
         address,
         port,
         last_seen: now_millis(),
+        manual: false,
     };
     let state = app.state::<Mutex<PeersState>>();
     let mut state = match state.lock() {
         Ok(state) => state,
         Err(_) => return,
     };
-    let changed = if let Some(existing) = state.peers.iter_mut().find(|peer| peer.id == id) {
+    let changed = if let Some(existing) = state
+        .peers
+        .iter_mut()
+        .find(|existing| {
+            existing.id == id || (existing.address == peer.address && existing.port == peer.port)
+        })
+    {
         let structural_change = existing.address != peer.address
             || existing.port != peer.port
             || existing.name != peer.name;
@@ -167,7 +175,9 @@ fn prune_stale_peers(app: &AppHandle) {
     };
     let cutoff = now_millis().saturating_sub(PEER_TIMEOUT.as_millis() as u64);
     let before = state.peers.len();
-    state.peers.retain(|peer| peer.last_seen >= cutoff);
+    state
+        .peers
+        .retain(|peer| peer.manual || peer.last_seen >= cutoff);
     if state.peers.len() != before {
         let peers = state.peers.clone();
         drop(state);
@@ -182,25 +192,25 @@ fn broadcast_discovery(app: AppHandle) {
     };
     let _ = socket.set_broadcast(true);
     loop {
-        let (id, name) = device_identity(&app);
-        let message = format!("{DISCOVERY_PREFIX}{id}|{name}|{TRANSFER_PORT}");
-        let broadcast_ok = match socket.send_to(message.as_bytes(), ("255.255.255.255", DISCOVERY_PORT)) {
-            Ok(_) => true,
-            Err(error) => {
-                record_transfer_error(&app, &format!("Discovery broadcast failed: {error}"));
-                false
-            }
-        };
-        let local_broadcast_ok = match socket.send_to(message.as_bytes(), ("127.0.0.1", DISCOVERY_PORT)) {
-            Ok(_) => true,
-            Err(error) => {
-                record_transfer_error(&app, &format!("Local discovery broadcast failed: {error}"));
-                false
-            }
-        };
-        DISCOVERY_BROADCAST_UP.store(broadcast_ok && local_broadcast_ok, Ordering::Relaxed);
+        if let Err(error) = send_discovery_announcement(&app, &socket) {
+            record_transfer_error(&app, &format!("Discovery broadcast failed: {error}"));
+        }
         thread::sleep(DISCOVERY_INTERVAL);
     }
+}
+
+fn send_discovery_announcement(app: &AppHandle, socket: &UdpSocket) -> Result<(), String> {
+    DISCOVERY_BROADCAST_UP.store(false, Ordering::Relaxed);
+    let (id, name) = device_identity(app);
+    let message = format!("{DISCOVERY_PREFIX}{id}|{name}|{TRANSFER_PORT}");
+    socket
+        .send_to(message.as_bytes(), ("255.255.255.255", DISCOVERY_PORT))
+        .map_err(|error| error.to_string())?;
+    socket
+        .send_to(message.as_bytes(), ("127.0.0.1", DISCOVERY_PORT))
+        .map_err(|error| error.to_string())?;
+    DISCOVERY_BROADCAST_UP.store(true, Ordering::Relaxed);
+    Ok(())
 }
 
 fn listen_for_transfers(app: AppHandle) {
@@ -359,7 +369,7 @@ pub fn send_shelf_items(
             .peers
             .iter()
             .find(|peer| peer.id == peer_id)
-            .map(|peer| format!("{}:{}", peer.address, peer.port))
+            .map(|peer| peer_endpoint(&peer.address, peer.port))
             .ok_or_else(|| "device is no longer on the network".to_string())?
     };
 
@@ -461,6 +471,29 @@ fn send_items_to_peer(app: &AppHandle, address: &str, item_ids: &[u64]) -> Resul
     Ok(sent)
 }
 
+fn peer_endpoint(address: &str, port: u16) -> String {
+    if address.contains(':') && !address.starts_with('[') {
+        format!("[{address}]:{port}")
+    } else {
+        format!("{address}:{port}")
+    }
+}
+
+fn normalize_peer_address(address: &str) -> Result<String, String> {
+    let address = address.trim();
+    if address.is_empty() {
+        return Err("device address is empty".to_string());
+    }
+    let address = address
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .unwrap_or(address);
+    if address.contains('/') || address.contains('\\') || address.chars().any(char::is_control) {
+        return Err("device address contains invalid characters".to_string());
+    }
+    Ok(address.to_string())
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferStatus {
@@ -480,6 +513,81 @@ pub fn transfer_status() -> TransferStatus {
         discovery_port: DISCOVERY_PORT,
         transfer_port: TRANSFER_PORT,
     }
+}
+
+#[tauri::command]
+pub fn scan_lan_devices(app: tauri::AppHandle) -> Result<(), String> {
+    let socket = UdpSocket::bind(("0.0.0.0", 0)).map_err(|error| error.to_string())?;
+    socket
+        .set_broadcast(true)
+        .map_err(|error| error.to_string())?;
+    send_discovery_announcement(&app, &socket).map_err(|error| {
+        record_transfer_error(&app, &format!("Manual discovery scan failed: {error}"));
+        error
+    })
+}
+
+#[tauri::command]
+pub fn add_manual_peer(
+    address: String,
+    port: u16,
+    name: Option<String>,
+    app: tauri::AppHandle,
+) -> Result<PeerInfo, String> {
+    if port == 0 {
+        return Err("device port must be between 1 and 65535".to_string());
+    }
+    let address = normalize_peer_address(&address)?;
+    let endpoint = peer_endpoint(&address, port);
+    endpoint
+        .to_socket_addrs()
+        .map_err(|error| format!("could not resolve {endpoint}: {error}"))?
+        .next()
+        .ok_or_else(|| format!("could not resolve {endpoint}"))?;
+    let name = name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .unwrap_or(&address)
+        .to_string();
+    let peer = PeerInfo {
+        id: format!("manual:{endpoint}"),
+        name,
+        address,
+        port,
+        last_seen: now_millis(),
+        manual: true,
+    };
+    let state = app.state::<Mutex<PeersState>>();
+    let mut state = state.lock().map_err(|_| "failed to lock peers".to_string())?;
+    if let Some(existing) = state
+        .peers
+        .iter_mut()
+        .find(|existing| existing.address == peer.address && existing.port == peer.port)
+    {
+        *existing = peer.clone();
+    } else {
+        state.peers.push(peer.clone());
+    }
+    let peers = state.peers.clone();
+    drop(state);
+    let _ = app.emit("peers-changed", peers);
+    Ok(peer)
+}
+
+#[tauri::command]
+pub fn remove_peer(peer_id: String, app: tauri::AppHandle) -> Result<(), String> {
+    let state = app.state::<Mutex<PeersState>>();
+    let mut state = state.lock().map_err(|_| "failed to lock peers".to_string())?;
+    let before = state.peers.len();
+    state.peers.retain(|peer| peer.id != peer_id);
+    if state.peers.len() == before {
+        return Err("device is no longer in the list".to_string());
+    }
+    let peers = state.peers.clone();
+    drop(state);
+    let _ = app.emit("peers-changed", peers);
+    Ok(())
 }
 
 #[derive(Clone, Serialize)]
@@ -634,5 +742,18 @@ mod tests {
         assert_eq!(sanitize_file_name("../secret:name?.txt"), "secret_name_.txt");
         assert_eq!(sanitize_file_name("plain.txt"), "plain.txt");
         assert_eq!(sanitize_file_name(""), "received");
+    }
+
+    #[test]
+    fn formats_ipv6_peer_endpoints() {
+        assert_eq!(peer_endpoint("192.168.1.20", 47654), "192.168.1.20:47654");
+        assert_eq!(peer_endpoint("fe80::1", 47654), "[fe80::1]:47654");
+    }
+
+    #[test]
+    fn normalizes_manual_peer_addresses() {
+        assert_eq!(normalize_peer_address("[fe80::1]"), Ok("fe80::1".to_string()));
+        assert!(normalize_peer_address("192.168.1.20/share").is_err());
+        assert!(normalize_peer_address(" ").is_err());
     }
 }

@@ -12,6 +12,7 @@ import {
   Laptop,
   Loader2,
   PanelTopOpen,
+  RefreshCw,
   Settings2,
   Send,
   ShieldCheck,
@@ -66,6 +67,7 @@ type PeerInfo = {
   address: string;
   port: number;
   lastSeen: number;
+  manual: boolean;
 };
 
 type TransferStatusInfo = {
@@ -114,6 +116,11 @@ function App() {
   const [transferStatusInfo, setTransferStatusInfo] = useState<TransferStatusInfo | null>(null);
   const [transferSelfCheck, setTransferSelfCheck] = useState<TransferSelfCheck | null>(null);
   const [isCheckingTransfer, setIsCheckingTransfer] = useState(false);
+  const [isScanningDevices, setIsScanningDevices] = useState(false);
+  const [isAddingPeer, setIsAddingPeer] = useState(false);
+  const [manualAddress, setManualAddress] = useState("");
+  const [manualPort, setManualPort] = useState("47654");
+  const [manualName, setManualName] = useState("");
   const [platformCapabilities, setPlatformCapabilities] =
     useState<PlatformCapabilities | null>(null);
   const shakeSupported = platformCapabilities?.shakeSupported ?? true;
@@ -421,6 +428,64 @@ function App() {
       setStatus(toErrorMessage(error));
     } finally {
       setIsCheckingTransfer(false);
+    }
+  }
+
+  async function scanLanDevices() {
+    setIsScanningDevices(true);
+    try {
+      await invoke("scan_lan_devices");
+      setStatus("LAN device scan started");
+    } catch (error) {
+      setStatus(toErrorMessage(error));
+    } finally {
+      setIsScanningDevices(false);
+    }
+  }
+
+  async function addManualPeer() {
+    const address = manualAddress.trim();
+    const port = Number(manualPort);
+    if (!address) {
+      setStatus("Enter a device address");
+      return;
+    }
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      setStatus("Enter a valid port");
+      return;
+    }
+    setIsAddingPeer(true);
+    try {
+      const peer = await invoke<PeerInfo>("add_manual_peer", {
+        address,
+        port,
+        name: manualName.trim() || null
+      });
+      setPeers((currentPeers) => {
+        const withoutEndpoint = currentPeers.filter(
+          (currentPeer) => currentPeer.address !== peer.address || currentPeer.port !== peer.port
+        );
+        return [...withoutEndpoint, peer];
+      });
+      setSelectedPeerId(peer.id);
+      setManualAddress("");
+      setManualName("");
+      setStatus(`Added ${peer.name}`);
+    } catch (error) {
+      setStatus(toErrorMessage(error));
+    } finally {
+      setIsAddingPeer(false);
+    }
+  }
+
+  async function removePeer(peer: PeerInfo) {
+    try {
+      await invoke("remove_peer", { peerId: peer.id });
+      setPeers((currentPeers) => currentPeers.filter((currentPeer) => currentPeer.id !== peer.id));
+      if (selectedPeerId === peer.id) setSelectedPeerId(null);
+      setStatus(`Removed ${peer.name}`);
+    } catch (error) {
+      setStatus(toErrorMessage(error));
     }
   }
 
@@ -878,16 +943,71 @@ function App() {
               <p className="eyebrow">LAN</p>
               <h1>Devices</h1>
             </div>
-            <button
-              className="secondary-button"
-              type="button"
-              disabled={isCheckingTransfer}
-              onClick={() => void runTransferSelfCheck()}
-            >
-              {isCheckingTransfer ? <Loader2 className="spin" size={16} /> : <ShieldCheck size={16} />}
-              Run self-check
-            </button>
+            <div className="toolbar-actions">
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={isScanningDevices}
+                onClick={() => void scanLanDevices()}
+              >
+                {isScanningDevices ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
+                Scan now
+              </button>
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={isCheckingTransfer}
+                onClick={() => void runTransferSelfCheck()}
+              >
+                {isCheckingTransfer ? <Loader2 className="spin" size={16} /> : <ShieldCheck size={16} />}
+                Run self-check
+              </button>
+            </div>
           </header>
+          <form
+            className="manual-peer-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void addManualPeer();
+            }}
+          >
+            <div className="manual-peer-heading">
+              <strong>Add a device manually</strong>
+              <span>Use an IP address or resolvable host name when automatic discovery is unavailable.</span>
+            </div>
+            <label>
+              Address
+              <input
+                value={manualAddress}
+                onChange={(event) => setManualAddress(event.target.value)}
+                placeholder="192.168.1.20"
+                autoComplete="off"
+              />
+            </label>
+            <label>
+              Port
+              <input
+                type="number"
+                min="1"
+                max="65535"
+                value={manualPort}
+                onChange={(event) => setManualPort(event.target.value)}
+              />
+            </label>
+            <label>
+              Name <span className="optional-label">optional</span>
+              <input
+                value={manualName}
+                onChange={(event) => setManualName(event.target.value)}
+                placeholder="Other computer"
+                autoComplete="off"
+              />
+            </label>
+            <button className="secondary-button" type="submit" disabled={isAddingPeer}>
+              {isAddingPeer ? <Loader2 className="spin" size={16} /> : <Laptop size={16} />}
+              Add device
+            </button>
+          </form>
           <div className="devices-list">
             {peers.length === 0 ? (
               <div className="empty-state">
@@ -912,21 +1032,41 @@ function App() {
                   <div className="item-copy">
                     <strong>{peer.name}</strong>
                     <span>
-                      {peer.address}:{peer.port}
+                      {peer.address.includes(":") && !peer.address.startsWith("[")
+                        ? `[${peer.address}]`
+                        : peer.address}
+                      :{peer.port}
+                      {peer.manual ? " · Manual" : ""}
                     </span>
                   </div>
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    disabled={items.length === 0 || isBusy}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void sendShelfItems(peer.id);
-                    }}
-                  >
-                    <Send size={16} />
-                    Send items
-                  </button>
+                  <div className="device-actions">
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      disabled={items.length === 0 || isBusy}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void sendShelfItems(peer.id);
+                      }}
+                    >
+                      <Send size={16} />
+                      Send items
+                    </button>
+                    {peer.manual && (
+                      <button
+                        className="icon-button small"
+                        type="button"
+                        title="Remove manual device"
+                        aria-label={`Remove ${peer.name}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void removePeer(peer);
+                        }}
+                      >
+                        <X size={16} />
+                      </button>
+                    )}
+                  </div>
                 </article>
               ))
             )}

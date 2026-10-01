@@ -93,3 +93,8 @@ connection succeeds, and the `received` directory is writable. If no peer is
 discovered, verify that both devices are on the same subnet and that UDP `47653`
 and TCP `47654` are allowed by the firewall. The result also shows the most
 recent listener or transfer error.
+
+Use **Scan now** to send an immediate discovery announcement. If broadcast
+discovery is unavailable, add the other computer with its IP address or host name
+and TCP port in **Add a device manually**, then test **Send items** from the new
+entry. Manual entries can be removed with the close button on their row.

@@ -62,6 +62,13 @@ Open **Devices** in the main window to see discovered devices and send the
 current Shelf items to a selected device. The main toolbar **Send** button uses
 the selected device (or the first device found).
 
+Device discovery runs automatically in the background. **Scan now** sends an
+immediate discovery announcement when a device list refresh is needed. If
+broadcast discovery is blocked, use **Add a device manually** with the target
+IP address or resolvable host name and TCP port. Manual entries remain available
+until removed and are replaced by an automatic entry when the same endpoint is
+later discovered.
+
 Limitations of this preview:
 
 - Transfers are unencrypted and unauthenticated; use it only on trusted LANs.
