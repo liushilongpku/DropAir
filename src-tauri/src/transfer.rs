@@ -28,6 +28,8 @@ pub struct PeerInfo {
     pub name: String,
     pub address: String,
     pub port: u16,
+    #[serde(default)]
+    pub addresses: Vec<String>,
     pub last_seen: u64,
     pub manual: bool,
     pub linked: bool,
@@ -40,6 +42,8 @@ struct SavedPeer {
     name: String,
     address: String,
     port: u16,
+    #[serde(default)]
+    addresses: Vec<String>,
     linked: bool,
 }
 
@@ -98,8 +102,13 @@ fn load_saved_peers(app: &AppHandle) -> Vec<PeerInfo> {
         .map(|peer| PeerInfo {
             id: peer.id,
             name: peer.name,
-            address: peer.address,
+            address: peer.address.clone(),
             port: peer.port,
+            addresses: if peer.addresses.is_empty() {
+                vec![peer.address]
+            } else {
+                peer.addresses
+            },
             last_seen: now_millis(),
             manual: true,
             linked: peer.linked,
@@ -120,6 +129,7 @@ fn save_peers(app: &AppHandle) -> Result<(), String> {
             name: peer.name.clone(),
             address: peer.address.clone(),
             port: peer.port,
+            addresses: peer.addresses.clone(),
             linked: peer.linked,
         })
         .collect::<Vec<_>>();
@@ -211,41 +221,49 @@ fn handle_discovery_message(app: &AppHandle, message: &str, address: String) {
         Ok(state) => state,
         Err(_) => return,
     };
-    let linked = state
-        .peers
-        .iter()
-        .find(|existing| {
-            existing.id == id || (existing.address == address && existing.port == port)
-        })
-        .map(|existing| existing.linked)
-        .unwrap_or(false);
-    let peer = PeerInfo {
-        id: id.to_string(),
-        name: if name.trim().is_empty() {
-            format!("DropAir device ({address})")
-        } else {
-            name.to_string()
-        },
-        address,
-        port,
-        last_seen: now_millis(),
-        manual: false,
-        linked,
+    let display_name = if name.trim().is_empty() {
+        format!("DropAir device ({address})")
+    } else {
+        name.to_string()
     };
-    let changed = if let Some(existing) = state
-        .peers
-        .iter_mut()
-        .find(|existing| {
-            existing.id == id || (existing.address == peer.address && existing.port == peer.port)
-        })
-    {
-        let structural_change = existing.address != peer.address
-            || existing.port != peer.port
-            || existing.name != peer.name;
-        *existing = peer;
+    let changed = if let Some(existing) = state.peers.iter_mut().find(|existing| {
+        existing.id == id
+            || existing.address == address
+            || existing.addresses.iter().any(|candidate| candidate == &address)
+    }) {
+        let mut structural_change = false;
+        if existing.addresses.is_empty() {
+            existing.addresses.push(existing.address.clone());
+        }
+        if !existing.addresses.iter().any(|candidate| candidate == &address) {
+            existing.addresses.push(address.clone());
+            structural_change = true;
+        }
+        if existing.id != id {
+            existing.id = id.to_string();
+            structural_change = true;
+        }
+        if existing.port != port {
+            existing.port = port;
+            structural_change = true;
+        }
+        if existing.name != display_name {
+            existing.name = display_name;
+            structural_change = true;
+        }
+        existing.last_seen = now_millis();
         structural_change
     } else {
-        state.peers.push(peer);
+        state.peers.push(PeerInfo {
+            id: id.to_string(),
+            name: display_name,
+            address: address.clone(),
+            port,
+            addresses: vec![address],
+            last_seen: now_millis(),
+            manual: false,
+            linked: false,
+        });
         true
     };
     if changed {
@@ -527,20 +545,30 @@ pub fn send_shelf_items(
     item_ids: Vec<u64>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
-    let address = {
+    let addresses = {
         let state = app.state::<Mutex<PeersState>>();
         let state = state.lock().map_err(|_| "failed to lock peers".to_string())?;
         state
             .peers
             .iter()
             .find(|peer| peer.id == peer_id && peer.linked)
-            .map(|peer| peer_endpoint(&peer.address, peer.port))
+            .map(|peer| peer_endpoints(peer))
             .ok_or_else(|| "device is no longer on the network".to_string())?
     };
 
     let app = app.clone();
     thread::spawn(move || {
-        let result = send_items_to_peer(&app, &address, &item_ids);
+        let mut last_error = None;
+        let result = addresses
+            .iter()
+            .find_map(|address| match send_items_to_peer(&app, address, &item_ids) {
+                Ok(sent) => Some(Ok(sent)),
+                Err(error) => {
+                    last_error = Some(error);
+                    None
+                }
+            })
+            .unwrap_or_else(|| Err(last_error.unwrap_or_else(|| "no device address is available".to_string())));
         if let Err(error) = &result {
             record_transfer_error(&app, &format!("Transfer failed: {error}"));
         }
@@ -675,6 +703,20 @@ fn peer_endpoint(address: &str, port: u16) -> String {
     }
 }
 
+fn peer_endpoints(peer: &PeerInfo) -> Vec<String> {
+    let mut addresses = Vec::with_capacity(peer.addresses.len() + 1);
+    addresses.push(peer.address.clone());
+    for address in &peer.addresses {
+        if !addresses.iter().any(|candidate| candidate == address) {
+            addresses.push(address.clone());
+        }
+    }
+    addresses
+        .into_iter()
+        .map(|address| peer_endpoint(&address, peer.port))
+        .collect()
+}
+
 fn normalize_peer_address(address: &str) -> Result<String, String> {
     let address = address.trim();
     if address.is_empty() {
@@ -749,11 +791,12 @@ pub fn add_manual_peer(
     let peer = PeerInfo {
         id: format!("manual:{endpoint}"),
         name,
-        address,
+        address: address.clone(),
         port,
+        addresses: vec![address],
         last_seen: now_millis(),
         manual: true,
-        linked: true,
+        linked: false,
     };
     let state = app.state::<Mutex<PeersState>>();
     let mut state = state.lock().map_err(|_| "failed to lock peers".to_string())?;
@@ -762,7 +805,9 @@ pub fn add_manual_peer(
         .iter_mut()
         .find(|existing| existing.address == peer.address && existing.port == peer.port)
     {
+        let linked = existing.linked;
         *existing = peer.clone();
+        existing.linked = linked;
     } else {
         state.peers.push(peer.clone());
     }
@@ -812,29 +857,49 @@ pub fn set_peer_linked(
 
 #[tauri::command]
 pub fn test_peer_connection(peer_id: String, app: tauri::AppHandle) -> Result<(), String> {
-    let endpoint = {
+    let endpoints = {
         let state = app.state::<Mutex<PeersState>>();
         let state = state.lock().map_err(|_| "failed to lock peers".to_string())?;
         state
             .peers
             .iter()
             .find(|peer| peer.id == peer_id && peer.linked)
-            .map(|peer| peer_endpoint(&peer.address, peer.port))
+            .map(peer_endpoints)
             .ok_or_else(|| "link the device before testing the connection".to_string())?
     };
-    let address = endpoint
-        .to_socket_addrs()
-        .map_err(|error| format!("could not resolve {endpoint}: {error}"))?
-        .next()
-        .ok_or_else(|| format!("could not resolve {endpoint}"))?;
-    let mut stream = TcpStream::connect_timeout(&address, Duration::from_secs(2))
-        .map_err(|error| format!("could not connect to {endpoint}: {error}"))?;
-    stream
-        .set_write_timeout(Some(Duration::from_secs(2)))
-        .map_err(|error| error.to_string())?;
-    let (id, name) = device_identity(&app);
-    writeln!(stream, "{TRANSFER_PREFIX}{id}|{name}")
-        .map_err(|error| format!("connected to {endpoint}, but handshake failed: {error}"))
+    let mut last_error = None;
+    for endpoint in endpoints {
+        let address = match endpoint.to_socket_addrs() {
+            Ok(mut addresses) => match addresses.next() {
+                Some(address) => address,
+                None => {
+                    last_error = Some(format!("could not resolve {endpoint}"));
+                    continue;
+                }
+            },
+            Err(error) => {
+                last_error = Some(format!("could not resolve {endpoint}: {error}"));
+                continue;
+            }
+        };
+        let mut stream = match TcpStream::connect_timeout(&address, Duration::from_secs(2)) {
+            Ok(stream) => stream,
+            Err(error) => {
+                last_error = Some(format!("could not connect to {endpoint}: {error}"));
+                continue;
+            }
+        };
+        stream
+            .set_write_timeout(Some(Duration::from_secs(2)))
+            .map_err(|error| error.to_string())?;
+        let (id, name) = device_identity(&app);
+        if let Err(error) = writeln!(stream, "{TRANSFER_PREFIX}{id}|{name}") {
+            last_error = Some(format!("connected to {endpoint}, but handshake failed: {error}"));
+            continue;
+        }
+        return Ok(());
+    }
+    Err(last_error.unwrap_or_else(|| "no device address is available".to_string()))
 }
 
 #[derive(Clone, Serialize)]

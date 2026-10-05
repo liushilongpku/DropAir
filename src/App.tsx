@@ -67,6 +67,7 @@ type PeerInfo = {
   name: string;
   address: string;
   port: number;
+  addresses: string[];
   lastSeen: number;
   manual: boolean;
   linked: boolean;
@@ -136,6 +137,7 @@ function App() {
   const [isCheckingTransfer, setIsCheckingTransfer] = useState(false);
   const [isScanningDevices, setIsScanningDevices] = useState(false);
   const [isAddingPeer, setIsAddingPeer] = useState(false);
+  const [showManualPeerForm, setShowManualPeerForm] = useState(false);
   const [manualAddress, setManualAddress] = useState("");
   const [manualPort, setManualPort] = useState("47654");
   const [manualName, setManualName] = useState("");
@@ -496,6 +498,7 @@ function App() {
         setShelfPeerId(peer.id);
       } else if (selectedPeerId === peer.id) {
         setSelectedPeerId(null);
+        setShelfPeerId(null);
       }
       setStatus(!peer.linked ? `${peer.name} linked` : `${peer.name} unlinked`);
     } catch (error) {
@@ -579,6 +582,7 @@ function App() {
       setSelectedPeerId(peer.id);
       setManualAddress("");
       setManualName("");
+      setShowManualPeerForm(false);
       setStatus(`Added ${peer.name}`);
     } catch (error) {
       setStatus(toErrorMessage(error));
@@ -1173,7 +1177,7 @@ function App() {
             {linkedPeers.length > 0
               ? `${linkedPeers.length} linked device${linkedPeers.length === 1 ? "" : "s"}`
               : peers.length > 0
-                ? "Devices found — add one to send"
+                ? "Devices found — link one to send"
                 : "Searching for devices"}
           </span>
         </footer>
@@ -1186,6 +1190,14 @@ function App() {
               <h1>Devices</h1>
             </div>
             <div className="toolbar-actions">
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => setShowManualPeerForm((visible) => !visible)}
+              >
+                <Laptop size={16} />
+                {showManualPeerForm ? "Close add form" : "Add device"}
+              </button>
               <button
                 className="secondary-button"
                 type="button"
@@ -1206,50 +1218,52 @@ function App() {
               </button>
             </div>
           </header>
-          <form
-            className="manual-peer-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void addManualPeer();
-            }}
-          >
-            <div className="manual-peer-heading">
-              <strong>Add a device manually</strong>
-              <span>Use an IP address or resolvable host name when automatic discovery is unavailable.</span>
-            </div>
-            <label>
-              Address
-              <input
-                value={manualAddress}
-                onChange={(event) => setManualAddress(event.target.value)}
-                placeholder="192.168.1.20"
-                autoComplete="off"
-              />
-            </label>
-            <label>
-              Port
-              <input
-                type="number"
-                min="1"
-                max="65535"
-                value={manualPort}
-                onChange={(event) => setManualPort(event.target.value)}
-              />
-            </label>
-            <label>
-              Name <span className="optional-label">optional</span>
-              <input
-                value={manualName}
-                onChange={(event) => setManualName(event.target.value)}
-                placeholder="Other computer"
-                autoComplete="off"
-              />
-            </label>
-            <button className="secondary-button" type="submit" disabled={isAddingPeer}>
-              {isAddingPeer ? <Loader2 className="spin" size={16} /> : <Laptop size={16} />}
-              Add device
-            </button>
-          </form>
+          {showManualPeerForm && (
+            <form
+              className="manual-peer-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void addManualPeer();
+              }}
+            >
+              <div className="manual-peer-heading">
+                <strong>Add a device manually</strong>
+                <span>Use an IP address or resolvable host name when automatic discovery is unavailable.</span>
+              </div>
+              <label>
+                Address
+                <input
+                  value={manualAddress}
+                  onChange={(event) => setManualAddress(event.target.value)}
+                  placeholder="192.168.1.20"
+                  autoComplete="off"
+                />
+              </label>
+              <label>
+                Port
+                <input
+                  type="number"
+                  min="1"
+                  max="65535"
+                  value={manualPort}
+                  onChange={(event) => setManualPort(event.target.value)}
+                />
+              </label>
+              <label>
+                Name <span className="optional-label">optional</span>
+                <input
+                  value={manualName}
+                  onChange={(event) => setManualName(event.target.value)}
+                  placeholder="Other computer"
+                  autoComplete="off"
+                />
+              </label>
+              <button className="secondary-button" type="submit" disabled={isAddingPeer}>
+                {isAddingPeer ? <Loader2 className="spin" size={16} /> : <Laptop size={16} />}
+                Add device
+              </button>
+            </form>
+          )}
           <div className="devices-list">
             {peers.length === 0 ? (
               <div className="empty-state">
@@ -1279,18 +1293,26 @@ function App() {
                         : peer.address}
                       :{peer.port}
                       {peer.manual ? " · Manual" : ""}
+                      {peer.addresses.length > 1 ? ` · ${peer.addresses.length} addresses` : ""}
                     </span>
                   </div>
                   <div className="device-actions">
+                    <div
+                      className={`peer-link-status${peer.linked ? " is-linked" : ""}`}
+                      title={peer.linked ? "This device is linked and available for sending" : "Link this device before sending"}
+                    >
+                      <span className="peer-status-dot" aria-hidden="true" />
+                      <span>{peer.linked ? "Linked" : "Not linked"}</span>
+                    </div>
                     <button
-                      className={`secondary-button${peer.linked ? " is-linked" : ""}`}
+                      className="secondary-button"
                       type="button"
                       onClick={(event) => {
                         event.stopPropagation();
                         void togglePeerLinked(peer);
                       }}
                     >
-                      {peer.linked ? "Linked" : "Add"}
+                      {peer.linked ? "Unlink" : "Link"}
                     </button>
                     <button
                       className="secondary-button"

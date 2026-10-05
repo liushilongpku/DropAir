@@ -70,11 +70,14 @@ IP address or resolvable host name and TCP port. Manual entries remain available
 until removed and are replaced by an automatic entry when the same endpoint is
 later discovered.
 
-Discovered devices can be linked explicitly with **Add**. Linked and manually
-added devices are saved locally and restored after restarting DropAir. Only
-linked devices are available as transfer targets; each linked row has a **Test**
-action. The compact Shelf includes a text input for direct paste and a per-item
-send button using the linked-device selector in its header.
+Discovered devices can be linked explicitly with **Link**. The device list
+merges multiple addresses announced by the same DropAir identity, so a machine
+with both `192.*` and `10.*` interfaces stays as one device and transfer tries
+the known addresses in order. Linked and manually added devices are saved
+locally and restored after restarting DropAir. Only linked devices are
+available as transfer targets; each linked row has a **Test** action. The
+compact Shelf includes a text input for direct paste and a per-item send button
+using the linked-device selector in its header.
 
 The Shelf supports individual item sending and a multi-select batch mode. The
 sidebar keeps **Sent** and **Received** transfer history. Discovery sends to the
