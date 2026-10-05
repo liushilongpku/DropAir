@@ -68,6 +68,7 @@ type PeerInfo = {
   port: number;
   lastSeen: number;
   manual: boolean;
+  linked: boolean;
 };
 
 type TransferStatusInfo = {
@@ -121,6 +122,9 @@ function App() {
   const [manualAddress, setManualAddress] = useState("");
   const [manualPort, setManualPort] = useState("47654");
   const [manualName, setManualName] = useState("");
+  const [shelfText, setShelfText] = useState("");
+  const [shelfPeerId, setShelfPeerId] = useState<string | null>(null);
+  const [testingPeerId, setTestingPeerId] = useState<string | null>(null);
   const [platformCapabilities, setPlatformCapabilities] =
     useState<PlatformCapabilities | null>(null);
   const shakeSupported = platformCapabilities?.shakeSupported ?? true;
@@ -131,6 +135,7 @@ function App() {
     () => items.reduce((sum, item) => sum + (item.size ?? 0), 0),
     [items]
   );
+  const linkedPeers = useMemo(() => peers.filter((peer) => peer.linked), [peers]);
 
   useEffect(() => {
     void refreshShelf();
@@ -397,8 +402,8 @@ function App() {
     }
   }
 
-  async function sendShelfItems(peerId: string) {
-    const itemIds = items
+  async function sendShelfItems(peerId: string, selectedItemIds?: number[]) {
+    const itemIds = selectedItemIds ?? items
       .filter((item) => item.kind !== "directory")
       .map((item) => item.id);
     if (itemIds.length === 0) {
@@ -414,6 +419,47 @@ function App() {
     } finally {
       setIsBusy(false);
     }
+  }
+
+  async function togglePeerLinked(peer: PeerInfo) {
+    try {
+      const nextPeers = await invoke<PeerInfo[]>("set_peer_linked", {
+        peerId: peer.id,
+        linked: !peer.linked
+      });
+      setPeers(nextPeers);
+      if (!peer.linked) {
+        setSelectedPeerId(peer.id);
+        setShelfPeerId(peer.id);
+      } else if (selectedPeerId === peer.id) {
+        setSelectedPeerId(null);
+      }
+      setStatus(!peer.linked ? `${peer.name} linked` : `${peer.name} unlinked`);
+    } catch (error) {
+      setStatus(toErrorMessage(error));
+    }
+  }
+
+  async function testPeerConnection(peer: PeerInfo) {
+    setTestingPeerId(peer.id);
+    try {
+      await invoke("test_peer_connection", { peerId: peer.id });
+      setStatus(`${peer.name} connection test passed`);
+    } catch (error) {
+      setStatus(toErrorMessage(error));
+    } finally {
+      setTestingPeerId(null);
+    }
+  }
+
+  async function addShelfText() {
+    const text = shelfText;
+    if (!text.trim()) {
+      setStatus("Enter text to add");
+      return;
+    }
+    await addText(text);
+    setShelfText("");
   }
 
   async function runTransferSelfCheck() {
@@ -633,6 +679,21 @@ function App() {
           </span>
           <div className="shake-shelf-actions">
             <span>{items.length} queued</span>
+            <select
+              className="shake-shelf-peer-select"
+              value={shelfPeerId ?? ""}
+              onChange={(event) => setShelfPeerId(event.target.value || null)}
+              onMouseDown={(event) => event.stopPropagation()}
+              aria-label="Choose linked device"
+              title="Choose linked device"
+            >
+              <option value="">Send to…</option>
+              {linkedPeers.map((peer) => (
+                <option value={peer.id} key={peer.id}>
+                  {peer.name}
+                </option>
+              ))}
+            </select>
             <button
               className="shake-shelf-icon"
               type="button"
@@ -652,6 +713,29 @@ function App() {
               <X size={14} />
             </button>
           </div>
+        </div>
+        <div className="shake-shelf-paste">
+          <textarea
+            value={shelfText}
+            onChange={(event) => setShelfText(event.target.value)}
+            onKeyDown={(event) => {
+              if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                event.preventDefault();
+                void addShelfText();
+              }
+            }}
+            placeholder="Paste text here…"
+            rows={2}
+            aria-label="Paste text into Shelf"
+          />
+          <button
+            className="shake-shelf-paste-button"
+            type="button"
+            disabled={!shelfText.trim() || isBusy}
+            onClick={() => void addShelfText()}
+          >
+            Add text
+          </button>
         </div>
         {items.length === 0 ? (
           <div className="shake-shelf-empty">
@@ -718,6 +802,22 @@ function App() {
                     </button>
                   </>
                 )}
+                <button
+                  className="shake-shelf-send"
+                  type="button"
+                  draggable={false}
+                  disabled={!shelfPeerId || isBusy || item.kind === "directory"}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onDragStart={(event) => event.stopPropagation()}
+                  onDoubleClick={(event) => event.stopPropagation()}
+                  onClick={() => {
+                    if (shelfPeerId) void sendShelfItems(shelfPeerId, [item.id]);
+                  }}
+                  title={shelfPeerId ? "Send item to selected device" : "Choose a linked device first"}
+                  aria-label={`Send ${item.name} to selected device`}
+                >
+                  <Send size={13} />
+                </button>
                 <button
                   className="shake-shelf-remove"
                   type="button"
@@ -840,10 +940,12 @@ function App() {
             <button
               className="primary-button"
               type="button"
-              disabled={items.length === 0 || peers.length === 0 || isBusy}
+              disabled={items.length === 0 || linkedPeers.length === 0 || isBusy}
               title="Send to device"
               onClick={() => {
-                const peerId = selectedPeerId ?? peers[0]?.id;
+                const peerId = linkedPeers.some((peer) => peer.id === selectedPeerId)
+                  ? selectedPeerId
+                  : linkedPeers[0]?.id;
                 if (peerId) void sendShelfItems(peerId);
               }}
             >
@@ -933,7 +1035,13 @@ function App() {
         <footer className="summary-bar">
           <span>{items.length} queued</span>
           <span>{formatSize(totalSize)}</span>
-          <span>{peers.length > 0 ? "LAN transfer ready" : "Searching for devices"}</span>
+          <span>
+            {linkedPeers.length > 0
+              ? `${linkedPeers.length} linked device${linkedPeers.length === 1 ? "" : "s"}`
+              : peers.length > 0
+                ? "Devices found — add one to send"
+                : "Searching for devices"}
+          </span>
         </footer>
       </section>
       ) : mainView === "devices" ? (
@@ -1041,9 +1149,31 @@ function App() {
                   </div>
                   <div className="device-actions">
                     <button
+                      className={`secondary-button${peer.linked ? " is-linked" : ""}`}
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void togglePeerLinked(peer);
+                      }}
+                    >
+                      {peer.linked ? "Linked" : "Add"}
+                    </button>
+                    <button
                       className="secondary-button"
                       type="button"
-                      disabled={items.length === 0 || isBusy}
+                      disabled={!peer.linked || testingPeerId === peer.id}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void testPeerConnection(peer);
+                      }}
+                    >
+                      {testingPeerId === peer.id ? <Loader2 className="spin" size={16} /> : <ShieldCheck size={16} />}
+                      Test
+                    </button>
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      disabled={!peer.linked || items.length === 0 || isBusy}
                       onClick={(event) => {
                         event.stopPropagation();
                         void sendShelfItems(peer.id);

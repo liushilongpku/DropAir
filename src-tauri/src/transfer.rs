@@ -26,6 +26,7 @@ pub struct PeerInfo {
     pub port: u16,
     pub last_seen: u64,
     pub manual: bool,
+    pub linked: bool,
 }
 
 #[derive(Default)]
@@ -131,6 +132,19 @@ fn handle_discovery_message(app: &AppHandle, message: &str, address: String) {
         return;
     }
 
+    let state = app.state::<Mutex<PeersState>>();
+    let mut state = match state.lock() {
+        Ok(state) => state,
+        Err(_) => return,
+    };
+    let linked = state
+        .peers
+        .iter()
+        .find(|existing| {
+            existing.id == id || (existing.address == address && existing.port == port)
+        })
+        .map(|existing| existing.linked)
+        .unwrap_or(false);
     let peer = PeerInfo {
         id: id.to_string(),
         name: name.to_string(),
@@ -138,11 +152,7 @@ fn handle_discovery_message(app: &AppHandle, message: &str, address: String) {
         port,
         last_seen: now_millis(),
         manual: false,
-    };
-    let state = app.state::<Mutex<PeersState>>();
-    let mut state = match state.lock() {
-        Ok(state) => state,
-        Err(_) => return,
+        linked,
     };
     let changed = if let Some(existing) = state
         .peers
@@ -368,7 +378,7 @@ pub fn send_shelf_items(
         state
             .peers
             .iter()
-            .find(|peer| peer.id == peer_id)
+            .find(|peer| peer.id == peer_id && peer.linked)
             .map(|peer| peer_endpoint(&peer.address, peer.port))
             .ok_or_else(|| "device is no longer on the network".to_string())?
     };
@@ -557,6 +567,7 @@ pub fn add_manual_peer(
         port,
         last_seen: now_millis(),
         manual: true,
+        linked: true,
     };
     let state = app.state::<Mutex<PeersState>>();
     let mut state = state.lock().map_err(|_| "failed to lock peers".to_string())?;
@@ -588,6 +599,53 @@ pub fn remove_peer(peer_id: String, app: tauri::AppHandle) -> Result<(), String>
     drop(state);
     let _ = app.emit("peers-changed", peers);
     Ok(())
+}
+
+#[tauri::command]
+pub fn set_peer_linked(
+    peer_id: String,
+    linked: bool,
+    app: tauri::AppHandle,
+) -> Result<Vec<PeerInfo>, String> {
+    let state = app.state::<Mutex<PeersState>>();
+    let mut state = state.lock().map_err(|_| "failed to lock peers".to_string())?;
+    let peer = state
+        .peers
+        .iter_mut()
+        .find(|peer| peer.id == peer_id)
+        .ok_or_else(|| "device is no longer in the list".to_string())?;
+    peer.linked = linked;
+    let peers = state.peers.clone();
+    drop(state);
+    let _ = app.emit("peers-changed", &peers);
+    Ok(peers)
+}
+
+#[tauri::command]
+pub fn test_peer_connection(peer_id: String, app: tauri::AppHandle) -> Result<(), String> {
+    let endpoint = {
+        let state = app.state::<Mutex<PeersState>>();
+        let state = state.lock().map_err(|_| "failed to lock peers".to_string())?;
+        state
+            .peers
+            .iter()
+            .find(|peer| peer.id == peer_id && peer.linked)
+            .map(|peer| peer_endpoint(&peer.address, peer.port))
+            .ok_or_else(|| "link the device before testing the connection".to_string())?
+    };
+    let address = endpoint
+        .to_socket_addrs()
+        .map_err(|error| format!("could not resolve {endpoint}: {error}"))?
+        .next()
+        .ok_or_else(|| format!("could not resolve {endpoint}"))?;
+    let mut stream = TcpStream::connect_timeout(&address, Duration::from_secs(2))
+        .map_err(|error| format!("could not connect to {endpoint}: {error}"))?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(2)))
+        .map_err(|error| error.to_string())?;
+    let (id, name) = device_identity(&app);
+    writeln!(stream, "{TRANSFER_PREFIX}{id}|{name}")
+        .map_err(|error| format!("connected to {endpoint}, but handshake failed: {error}"))
 }
 
 #[derive(Clone, Serialize)]

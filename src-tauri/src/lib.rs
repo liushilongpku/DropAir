@@ -647,7 +647,9 @@ pub fn run() {
             transfer::transfer_self_check,
             transfer::scan_lan_devices,
             transfer::add_manual_peer,
-            transfer::remove_peer
+            transfer::remove_peer,
+            transfer::set_peer_linked,
+            transfer::test_peer_connection
         ])
         .build(tauri::generate_context!())
         .expect("error while building DropAir");

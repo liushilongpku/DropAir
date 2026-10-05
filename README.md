@@ -69,6 +69,11 @@ IP address or resolvable host name and TCP port. Manual entries remain available
 until removed and are replaced by an automatic entry when the same endpoint is
 later discovered.
 
+Discovered devices can be linked explicitly with **Add**. Only linked devices
+are available as transfer targets; each linked row has a **Test** action. The
+compact Shelf includes a text input for direct paste and a per-item send button
+using the linked-device selector in its header.
+
 Limitations of this preview:
 
 - Transfers are unencrypted and unauthenticated; use it only on trusted LANs.

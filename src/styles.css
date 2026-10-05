@@ -78,6 +78,68 @@ kbd {
   gap: 8px;
 }
 
+.shake-shelf-peer-select {
+  max-width: 112px;
+  min-height: 25px;
+  padding: 0 4px;
+  border: 1px solid #cbded3;
+  border-radius: 5px;
+  color: #315d52;
+  background: #ffffff;
+  font-size: 11px;
+}
+
+.shake-shelf-paste {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #dcebe2;
+}
+
+.shake-shelf-paste textarea {
+  min-width: 0;
+  flex: 1 1 auto;
+  resize: vertical;
+  padding: 6px 7px;
+  border: 1px solid #cbded3;
+  border-radius: 5px;
+  color: #315d52;
+  background: #ffffff;
+  font: inherit;
+  font-size: 12px;
+}
+
+.shake-shelf-paste-button,
+.shake-shelf-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #cbded3;
+  border-radius: 5px;
+  color: #315d52;
+  background: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.shake-shelf-paste-button {
+  align-self: stretch;
+  padding: 0 8px;
+}
+
+.shake-shelf-paste-button:disabled,
+.shake-shelf-send:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.shake-shelf-send {
+  width: 23px;
+  height: 23px;
+  flex: 0 0 auto;
+  padding: 0;
+}
+
 .shake-shelf-drag-handle {
   align-self: stretch;
   display: flex;
@@ -844,6 +906,12 @@ h1 {
 .secondary-button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
+}
+
+.secondary-button.is-linked {
+  border-color: #7fb7a1;
+  color: #11645b;
+  background: #eef7f2;
 }
 
 @keyframes spin {
