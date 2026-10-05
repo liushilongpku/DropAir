@@ -149,7 +149,10 @@ fn device_identity(app: &AppHandle) -> (String, String) {
     let identity = match state.lock() {
         Ok(store) => {
             let settings = store.settings();
-            (settings.device_id, settings.device_name)
+            (
+                settings.device_id,
+                crate::settings::sanitize_device_name(&settings.device_name),
+            )
         }
         Err(_) => ("unknown".to_string(), "DropAir".to_string()),
     };
@@ -224,7 +227,7 @@ fn handle_discovery_message(app: &AppHandle, message: &str, address: String) {
     let display_name = if name.trim().is_empty() {
         format!("DropAir device ({address})")
     } else {
-        name.to_string()
+        crate::settings::sanitize_device_name(name)
     };
     let changed = if let Some(existing) = state.peers.iter_mut().find(|existing| {
         existing.id == id

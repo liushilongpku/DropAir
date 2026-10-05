@@ -79,6 +79,10 @@ available as transfer targets; each linked row has a **Test** action. The
 compact Shelf includes a text input for direct paste and a per-item send button
 using the linked-device selector in its header.
 
+The device name is read from the operating system (Windows hostname or macOS
+Computer Name) and can be changed from Settings. This name is the one shown to
+other DropAir devices.
+
 The Shelf supports individual item sending and a multi-select batch mode. The
 sidebar keeps **Sent** and **Received** transfer history. Discovery sends to the
 directed broadcast address of every local IPv4 interface as well as the normal

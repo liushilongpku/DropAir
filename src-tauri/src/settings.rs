@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 use tauri::Manager;
 
 const SETTINGS_FILE: &str = "settings.json";
@@ -75,7 +76,7 @@ impl SettingsStore {
             settings.device_id = generate_device_id();
             generated_identity = true;
         }
-        if settings.device_name.is_empty() {
+        if settings.device_name.trim().is_empty() || settings.device_name.trim() == "DropAir" {
             settings.device_name = default_device_name();
             generated_identity = true;
         }
@@ -133,6 +134,20 @@ impl SettingsStore {
         Ok(self.settings())
     }
 
+    pub fn set_device_name(&mut self, name: String) -> Result<AppSettings, String> {
+        let name = sanitize_device_name(&name);
+        if name.is_empty() {
+            return Err("device name cannot be empty".to_string());
+        }
+        let previous = self.settings.device_name.clone();
+        self.settings.device_name = name;
+        if let Err(error) = self.save() {
+            self.settings.device_name = previous;
+            return Err(error);
+        }
+        Ok(self.settings())
+    }
+
     fn save(&self) -> Result<(), String> {
         let parent = self
             .path
@@ -160,9 +175,49 @@ fn generate_device_id() -> String {
 }
 
 fn default_device_name() -> String {
-    std::env::var("COMPUTERNAME")
-        .or_else(|_| std::env::var("HOSTNAME"))
-        .unwrap_or_else(|_| "DropAir".to_string())
+    let mut candidates = Vec::new();
+    #[cfg(target_os = "macos")]
+    candidates.push(command_output("scutil", &["--get", "ComputerName"]));
+    #[cfg(target_os = "windows")]
+    candidates.push(command_output("hostname", &[]));
+    candidates.extend([
+        std::env::var("COMPUTERNAME").ok(),
+        std::env::var("HOSTNAME").ok(),
+        command_output("hostname", &[]),
+    ]);
+    candidates
+        .into_iter()
+        .flatten()
+        .map(|name| sanitize_device_name(&name))
+        .find(|name| !name.is_empty())
+        .unwrap_or_else(|| "DropAir".to_string())
+}
+
+fn command_output(command: &str, args: &[&str]) -> Option<String> {
+    Command::new(command)
+        .args(args)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+}
+
+pub fn sanitize_device_name(name: &str) -> String {
+    name.chars()
+        .map(|character| {
+            if character.is_ascii_control() || character == '|' {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(80)
+        .collect()
 }
 
 #[cfg(test)]
@@ -185,5 +240,10 @@ mod tests {
             height: 130.0,
         }
         .is_valid());
+    }
+
+    #[test]
+    fn sanitizes_device_names_for_discovery() {
+        assert_eq!(sanitize_device_name(" Mac | Office\n"), "Mac Office");
     }
 }

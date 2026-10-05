@@ -262,6 +262,17 @@ fn set_download_directory(
 }
 
 #[tauri::command]
+fn set_device_name(
+    name: String,
+    state: tauri::State<'_, Mutex<SettingsStore>>,
+) -> Result<AppSettings, String> {
+    state
+        .lock()
+        .map_err(|_| "failed to lock settings")?
+        .set_device_name(name)
+}
+
+#[tauri::command]
 fn set_shake_enabled(
     enabled: bool,
     state: tauri::State<'_, Mutex<SettingsStore>>,
@@ -653,6 +664,7 @@ pub fn run() {
             set_autostart,
             app_settings,
             set_download_directory,
+            set_device_name,
             set_shake_enabled,
             set_shake_sensitivity,
             accessibility_permission_status,

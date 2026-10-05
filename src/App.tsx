@@ -52,6 +52,7 @@ type ShakeDiagnostics = {
 type AppSettings = {
   shakeEnabled: boolean;
   shakeSensitivity: number;
+  deviceName: string;
   downloadDirectory: string | null;
 };
 
@@ -124,6 +125,7 @@ function App() {
   const [shakeEnabled, setShakeEnabledState] = useState(true);
   const [shakeSensitivity, setShakeSensitivityState] = useState(3);
   const [accessibilityAllowed, setAccessibilityAllowed] = useState<boolean | null>(null);
+  const [deviceName, setDeviceName] = useState("");
   const [downloadDirectory, setDownloadDirectory] = useState("");
   const [settingsReady, setSettingsReady] = useState(false);
   const [peers, setPeers] = useState<PeerInfo[]>([]);
@@ -232,6 +234,7 @@ function App() {
         setLaunchAtLogin(autostart);
         setShakeEnabledState(appSettings.shakeEnabled);
         setShakeSensitivityState(appSettings.shakeSensitivity);
+        setDeviceName(appSettings.deviceName);
         setDownloadDirectory(appSettings.downloadDirectory ?? effectiveDownloadDirectory);
         setPlatformCapabilities(capabilities);
         setAccessibilityAllowed(accessibility);
@@ -653,6 +656,19 @@ function App() {
       const effective = await invoke<string>("download_directory");
       setDownloadDirectory(settings.downloadDirectory ?? effective);
       setStatus(settings.downloadDirectory ? "Download location updated" : "Using default Downloads folder");
+    } catch (error) {
+      setStatus(toErrorMessage(error));
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function updateDeviceName() {
+    setIsBusy(true);
+    try {
+      const settings = await invoke<AppSettings>("set_device_name", { name: deviceName });
+      setDeviceName(settings.deviceName);
+      setStatus("Device name updated");
     } catch (error) {
       setStatus(toErrorMessage(error));
     } finally {
@@ -1505,6 +1521,31 @@ function App() {
               >
                 <span />
               </button>
+            </div>
+
+            <div className="setting-row download-location-row">
+              <div className="setting-copy">
+                <strong>Device name</strong>
+                <span>This name is shown to other DropAir devices on the network.</span>
+              </div>
+              <div className="download-location-control">
+                <input
+                  value={deviceName}
+                  onChange={(event) => setDeviceName(event.target.value)}
+                  aria-label="Device name"
+                  placeholder="Computer name"
+                  maxLength={80}
+                  disabled={!settingsReady || isBusy}
+                />
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={!settingsReady || isBusy || !deviceName.trim()}
+                  onClick={() => void updateDeviceName()}
+                >
+                  Save
+                </button>
+              </div>
             </div>
 
             <div className="setting-row download-location-row">
