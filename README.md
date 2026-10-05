@@ -55,9 +55,9 @@ files and text between devices:
 
 - Discovery: every instance broadcasts its identity over UDP port `47653`.
 - Transfer: files and text are streamed over TCP port `47654`.
-- Received files are stored under DropAir's app data `received` directory and
-  added to the local Shelf automatically. Received text is restored as a text
-  Shelf item.
+- Received files are stored in the configurable **Download location** from
+  Settings. The default is `Downloads/DropAir`; received text is restored as a
+  text Shelf item.
 
 Open **Devices** in the main window to see discovered devices and send the
 current Shelf items to a selected device. The main toolbar **Send** button uses

@@ -959,6 +959,31 @@ h1 {
   gap: 12px;
 }
 
+.download-location-control {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: min(100%, 540px);
+}
+
+.download-location-control input {
+  width: min(360px, 42vw);
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid #cbd6cf;
+  border-radius: 8px;
+  color: #29433c;
+  background: #ffffff;
+  font: inherit;
+  font-size: 12px;
+}
+
+.download-location-control input:focus {
+  outline: 2px solid #9ccbb3;
+  outline-offset: 1px;
+}
+
 .permission-status {
   min-width: 72px;
   color: #8a4b20;
@@ -1076,5 +1101,16 @@ h1 {
   .permission-actions {
     width: 100%;
     justify-content: space-between;
+  }
+
+  .download-location-control {
+    width: 100%;
+    min-width: 0;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .download-location-control input {
+    width: 100%;
   }
 }

@@ -15,6 +15,7 @@ pub struct AppSettings {
     pub shelf_frame: Option<ShelfFrame>,
     pub device_id: String,
     pub device_name: String,
+    pub download_directory: Option<String>,
 }
 
 impl Default for AppSettings {
@@ -25,6 +26,7 @@ impl Default for AppSettings {
             shelf_frame: None,
             device_id: String::new(),
             device_name: String::new(),
+            download_directory: None,
         }
     }
 }
@@ -119,6 +121,16 @@ impl SettingsStore {
             return Err(error);
         }
         Ok(())
+    }
+
+    pub fn set_download_directory(&mut self, directory: Option<String>) -> Result<AppSettings, String> {
+        let previous = self.settings.download_directory.clone();
+        self.settings.download_directory = directory;
+        if let Err(error) = self.save() {
+            self.settings.download_directory = previous;
+            return Err(error);
+        }
+        Ok(self.settings())
     }
 
     fn save(&self) -> Result<(), String> {

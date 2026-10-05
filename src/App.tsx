@@ -52,6 +52,7 @@ type ShakeDiagnostics = {
 type AppSettings = {
   shakeEnabled: boolean;
   shakeSensitivity: number;
+  downloadDirectory: string | null;
 };
 
 type PlatformCapabilities = {
@@ -122,6 +123,7 @@ function App() {
   const [shakeEnabled, setShakeEnabledState] = useState(true);
   const [shakeSensitivity, setShakeSensitivityState] = useState(3);
   const [accessibilityAllowed, setAccessibilityAllowed] = useState<boolean | null>(null);
+  const [downloadDirectory, setDownloadDirectory] = useState("");
   const [settingsReady, setSettingsReady] = useState(false);
   const [peers, setPeers] = useState<PeerInfo[]>([]);
   const [selectedPeerId, setSelectedPeerId] = useState<string | null>(null);
@@ -218,15 +220,17 @@ function App() {
     if (isShelfWindow) return;
     const loadSettings = async () => {
       try {
-        const [autostart, appSettings, capabilities, accessibility] = await Promise.all([
+        const [autostart, appSettings, capabilities, accessibility, effectiveDownloadDirectory] = await Promise.all([
           invoke<boolean>("autostart_enabled"),
           invoke<AppSettings>("app_settings"),
           invoke<PlatformCapabilities>("platform_capabilities"),
-          invoke<boolean>("accessibility_permission_status")
+          invoke<boolean>("accessibility_permission_status"),
+          invoke<string>("download_directory")
         ]);
         setLaunchAtLogin(autostart);
         setShakeEnabledState(appSettings.shakeEnabled);
         setShakeSensitivityState(appSettings.shakeSensitivity);
+        setDownloadDirectory(appSettings.downloadDirectory ?? effectiveDownloadDirectory);
         setPlatformCapabilities(capabilities);
         setAccessibilityAllowed(accessibility);
       } catch (error) {
@@ -635,6 +639,20 @@ function App() {
       setStatus(`Shake sensitivity set to ${settings.shakeSensitivity}`);
     } catch (error) {
       setStatus(toErrorMessage(error));
+    }
+  }
+
+  async function updateDownloadDirectory(directory: string) {
+    setIsBusy(true);
+    try {
+      const settings = await invoke<AppSettings>("set_download_directory", { directory });
+      const effective = await invoke<string>("download_directory");
+      setDownloadDirectory(settings.downloadDirectory ?? effective);
+      setStatus(settings.downloadDirectory ? "Download location updated" : "Using default Downloads folder");
+    } catch (error) {
+      setStatus(toErrorMessage(error));
+    } finally {
+      setIsBusy(false);
     }
   }
 
@@ -1465,6 +1483,39 @@ function App() {
               >
                 <span />
               </button>
+            </div>
+
+            <div className="setting-row download-location-row">
+              <div className="setting-copy">
+                <strong>Download location</strong>
+                <span>Received files are saved here. The default is a DropAir folder inside Downloads.</span>
+              </div>
+              <div className="download-location-control">
+                <input
+                  value={downloadDirectory}
+                  onChange={(event) => setDownloadDirectory(event.target.value)}
+                  aria-label="Download location"
+                  placeholder="Default Downloads folder"
+                  spellCheck={false}
+                  disabled={!settingsReady || isBusy}
+                />
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={!settingsReady || isBusy || !downloadDirectory.trim()}
+                  onClick={() => void updateDownloadDirectory(downloadDirectory)}
+                >
+                  Save
+                </button>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={!settingsReady || isBusy}
+                  onClick={() => void updateDownloadDirectory("")}
+                >
+                  Use default
+                </button>
+              </div>
             </div>
 
             {accessibilityRequired && <div className="setting-row">

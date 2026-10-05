@@ -431,14 +431,41 @@ fn handle_incoming_transfer(app: &AppHandle, stream: TcpStream) -> Result<(), St
     Ok(())
 }
 
-fn received_directory(app: &AppHandle) -> Result<PathBuf, String> {
-    let directory = app
-        .path()
+fn configured_download_directory(app: &AppHandle) -> Result<Option<PathBuf>, String> {
+    let settings = app.state::<Mutex<SettingsStore>>();
+    let directory = settings
+        .lock()
+        .map_err(|_| "failed to lock settings".to_string())?
+        .settings()
+        .download_directory;
+    Ok(directory
+        .filter(|directory| !directory.trim().is_empty())
+        .map(PathBuf::from)
+        .filter(|directory| directory.is_absolute()))
+}
+
+fn download_directory_path(app: &AppHandle) -> Result<PathBuf, String> {
+    if let Some(directory) = configured_download_directory(app)? {
+        return Ok(directory);
+    }
+    if let Ok(directory) = app.path().download_dir() {
+        return Ok(directory.join("DropAir"));
+    }
+    app.path()
         .app_data_dir()
-        .map_err(|error| error.to_string())?
-        .join("received");
+        .map(|directory| directory.join("received"))
+        .map_err(|error| error.to_string())
+}
+
+fn received_directory(app: &AppHandle) -> Result<PathBuf, String> {
+    let directory = download_directory_path(app)?;
     std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
     Ok(directory)
+}
+
+#[tauri::command]
+pub fn download_directory(app: tauri::AppHandle) -> Result<String, String> {
+    Ok(download_directory_path(&app)?.to_string_lossy().to_string())
 }
 
 fn sanitize_file_name(name: &str) -> String {

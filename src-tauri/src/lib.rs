@@ -238,6 +238,30 @@ fn app_settings(state: tauri::State<'_, Mutex<SettingsStore>>) -> Result<AppSett
 }
 
 #[tauri::command]
+fn set_download_directory(
+    directory: String,
+    state: tauri::State<'_, Mutex<SettingsStore>>,
+) -> Result<AppSettings, String> {
+    let directory = directory.trim();
+    let directory = if directory.is_empty() {
+        None
+    } else {
+        let path = Path::new(directory);
+        if !path.is_absolute() {
+            return Err("download directory must be an absolute path".to_string());
+        }
+        if directory.chars().any(char::is_control) {
+            return Err("download directory contains invalid characters".to_string());
+        }
+        Some(directory.to_string())
+    };
+    state
+        .lock()
+        .map_err(|_| "failed to lock settings")?
+        .set_download_directory(directory)
+}
+
+#[tauri::command]
 fn set_shake_enabled(
     enabled: bool,
     state: tauri::State<'_, Mutex<SettingsStore>>,
@@ -628,6 +652,7 @@ pub fn run() {
             autostart_enabled,
             set_autostart,
             app_settings,
+            set_download_directory,
             set_shake_enabled,
             set_shake_sensitivity,
             accessibility_permission_status,
@@ -644,6 +669,7 @@ pub fn run() {
             transfer::list_peers,
             transfer::send_shelf_items,
             transfer::transfer_status,
+            transfer::download_directory,
             transfer::transfer_self_check,
             transfer::scan_lan_devices,
             transfer::add_manual_peer,
