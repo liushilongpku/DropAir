@@ -1,7 +1,7 @@
 use crate::settings::SettingsStore;
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
+use std::net::{Ipv4Addr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -16,8 +16,12 @@ const PEER_TIMEOUT: Duration = Duration::from_secs(20);
 const SOCKET_TIMEOUT: Duration = Duration::from_secs(30);
 const DISCOVERY_PREFIX: &str = "DROP_AIR_DISCOVERY_V1|";
 const TRANSFER_PREFIX: &str = "DROP_AIR_TRANSFER_V1|";
+const TRANSFER_ACK_PREFIX: &str = "DROP_AIR_ACK_V1|";
+const MAX_TRANSFER_ITEM_SIZE: u64 = 4 * 1024 * 1024 * 1024;
+const MAX_TRANSFER_TEXT_SIZE: u64 = 16 * 1024 * 1024;
+const PEERS_FILE: &str = "peers.json";
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PeerInfo {
     pub id: String,
@@ -27,6 +31,16 @@ pub struct PeerInfo {
     pub last_seen: u64,
     pub manual: bool,
     pub linked: bool,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedPeer {
+    id: String,
+    name: String,
+    address: String,
+    port: u16,
+    linked: bool,
 }
 
 #[derive(Default)]
@@ -48,7 +62,10 @@ struct TransferHeader {
 }
 
 pub fn setup(app: &AppHandle) -> Result<(), String> {
-    app.manage(Mutex::new(PeersState::default()));
+    app.manage(Mutex::new(PeersState {
+        peers: load_saved_peers(app),
+        last_error: None,
+    }));
     let discovery_app = app.clone();
     thread::spawn(move || listen_for_discovery(discovery_app));
 
@@ -58,6 +75,63 @@ pub fn setup(app: &AppHandle) -> Result<(), String> {
     let transfer_app = app.clone();
     thread::spawn(move || listen_for_transfers(transfer_app));
     Ok(())
+}
+
+fn peers_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_config_dir()
+        .map_err(|error| error.to_string())?
+        .join(PEERS_FILE))
+}
+
+fn load_saved_peers(app: &AppHandle) -> Vec<PeerInfo> {
+    let Ok(path) = peers_path(app) else {
+        return Vec::new();
+    };
+    let Ok(contents) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    serde_json::from_str::<Vec<SavedPeer>>(&contents)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|peer| PeerInfo {
+            id: peer.id,
+            name: peer.name,
+            address: peer.address,
+            port: peer.port,
+            last_seen: now_millis(),
+            manual: true,
+            linked: peer.linked,
+        })
+        .collect()
+}
+
+fn save_peers(app: &AppHandle) -> Result<(), String> {
+    let peers = app
+        .state::<Mutex<PeersState>>()
+        .lock()
+        .map_err(|_| "failed to lock peers".to_string())?
+        .peers
+        .iter()
+        .filter(|peer| peer.manual || peer.linked)
+        .map(|peer| SavedPeer {
+            id: peer.id.clone(),
+            name: peer.name.clone(),
+            address: peer.address.clone(),
+            port: peer.port,
+            linked: peer.linked,
+        })
+        .collect::<Vec<_>>();
+    let path = peers_path(app)?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| "peers path has no parent directory".to_string())?;
+    std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let temporary_path = path.with_extension("json.tmp");
+    let contents = serde_json::to_vec_pretty(&peers).map_err(|error| error.to_string())?;
+    std::fs::write(&temporary_path, contents).map_err(|error| error.to_string())?;
+    std::fs::rename(temporary_path, path).map_err(|error| error.to_string())
 }
 
 fn device_identity(app: &AppHandle) -> (String, String) {
@@ -177,6 +251,7 @@ fn handle_discovery_message(app: &AppHandle, message: &str, address: String) {
     if changed {
         let peers = state.peers.clone();
         drop(state);
+        let _ = save_peers(app);
         let _ = app.emit("peers-changed", peers);
     }
 }
@@ -273,6 +348,10 @@ fn listen_for_transfers(app: AppHandle) {
 fn handle_incoming_transfer(app: &AppHandle, stream: TcpStream) -> Result<(), String> {
     stream.set_read_timeout(Some(SOCKET_TIMEOUT)).map_err(|error| error.to_string())?;
     stream.set_write_timeout(Some(SOCKET_TIMEOUT)).map_err(|error| error.to_string())?;
+    let mut writer = stream.try_clone().map_err(|error| error.to_string())?;
+    writer
+        .set_write_timeout(Some(SOCKET_TIMEOUT))
+        .map_err(|error| error.to_string())?;
     let mut reader = BufReader::new(stream);
     let mut handshake = String::new();
     reader.read_line(&mut handshake).map_err(|error| error.to_string())?;
@@ -282,6 +361,7 @@ fn handle_incoming_transfer(app: &AppHandle, stream: TcpStream) -> Result<(), St
         .and_then(|payload| payload.splitn(3, '|').nth(1))
         .unwrap_or("Unknown device")
         .to_string();
+    let mut received_items = 0usize;
 
     loop {
         let mut header_line = String::new();
@@ -290,26 +370,52 @@ fn handle_incoming_transfer(app: &AppHandle, stream: TcpStream) -> Result<(), St
         }
         let header: TransferHeader =
             serde_json::from_str(header_line.trim()).map_err(|error| error.to_string())?;
-        let file_name = sanitize_file_name(&header.name);
-        let received_dir = received_directory(app)?;
-        std::fs::create_dir_all(&received_dir).map_err(|error| error.to_string())?;
-        let target_path = received_dir.join(format!("{}_{}", now_millis(), file_name));
-        let mut file = std::fs::File::create(&target_path).map_err(|error| error.to_string())?;
-        let mut remaining = header.size;
-        let mut buffer = vec![0u8; 64 * 1024];
-        while remaining > 0 {
-            let chunk_size = remaining.min(buffer.len() as u64) as usize;
-            let read = reader
-                .read(&mut buffer[..chunk_size])
-                .map_err(|error| error.to_string())?;
-            if read == 0 {
-                return Err("connection closed before payload finished".to_string());
-            }
-            file.write_all(&buffer[..read]).map_err(|error| error.to_string())?;
-            remaining -= read as u64;
+        let kind = header.kind.as_str();
+        let max_size = if kind == "text" {
+            MAX_TRANSFER_TEXT_SIZE
+        } else if kind == "file" {
+            MAX_TRANSFER_ITEM_SIZE
+        } else {
+            return Err(format!("unsupported transfer item kind: {}", header.kind));
+        };
+        if header.size > max_size {
+            return Err(format!("transfer item is too large: {} bytes", header.size));
         }
-        let target = target_path.to_string_lossy().to_string();
-        let _ = crate::add_shelf_paths(vec![target], app.clone());
+
+        if kind == "text" {
+            let mut content = vec![0u8; header.size as usize];
+            reader
+                .read_exact(&mut content)
+                .map_err(|error| format!("could not read text payload: {error}"))?;
+            let content = String::from_utf8(content)
+                .map_err(|_| "received text is not valid UTF-8".to_string())?;
+            crate::add_shelf_text_to_app(app, content)?;
+        } else {
+            let file_name = sanitize_file_name(&header.name);
+            let received_dir = received_directory(app)?;
+            let target_path = received_dir.join(format!("{}_{}", now_millis(), file_name));
+            let temporary_path = target_path.with_extension("dropair-partial");
+            let mut file = std::fs::File::create(&temporary_path).map_err(|error| error.to_string())?;
+            let mut remaining = header.size;
+            let mut buffer = vec![0u8; 64 * 1024];
+            while remaining > 0 {
+                let chunk_size = remaining.min(buffer.len() as u64) as usize;
+                let read = reader
+                    .read(&mut buffer[..chunk_size])
+                    .map_err(|error| error.to_string())?;
+                if read == 0 {
+                    let _ = std::fs::remove_file(&temporary_path);
+                    return Err("connection closed before payload finished".to_string());
+                }
+                file.write_all(&buffer[..read]).map_err(|error| error.to_string())?;
+                remaining -= read as u64;
+            }
+            file.sync_all().map_err(|error| error.to_string())?;
+            std::fs::rename(&temporary_path, &target_path).map_err(|error| error.to_string())?;
+            let target = target_path.to_string_lossy().to_string();
+            crate::add_shelf_paths(vec![target], app.clone())?;
+        }
+        received_items += 1;
         let _ = app.emit(
             "transfer-status",
             serde_json::json!({
@@ -319,6 +425,9 @@ fn handle_incoming_transfer(app: &AppHandle, stream: TcpStream) -> Result<(), St
             }),
         );
     }
+    writeln!(writer, "{TRANSFER_ACK_PREFIX}complete|{received_items}")
+        .map_err(|error| error.to_string())?;
+    writer.flush().map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -436,6 +545,7 @@ fn send_items_to_peer(app: &AppHandle, address: &str, item_ids: &[u64]) -> Resul
     stream
         .set_write_timeout(Some(SOCKET_TIMEOUT))
         .map_err(|error| error.to_string())?;
+    let mut reader = BufReader::new(stream.try_clone().map_err(|error| error.to_string())?);
     let (id, name) = device_identity(app);
     writeln!(stream, "{TRANSFER_PREFIX}{id}|{name}")
         .map_err(|error| error.to_string())?;
@@ -497,7 +607,37 @@ fn send_items_to_peer(app: &AppHandle, address: &str, item_ids: &[u64]) -> Resul
             }
         }
     }
+    stream
+        .shutdown(Shutdown::Write)
+        .map_err(|error| format!("could not finish transfer: {error}"))?;
+    wait_for_transfer_completion(&mut reader, sent)?;
     Ok(sent)
+}
+
+fn wait_for_transfer_completion(reader: &mut BufReader<TcpStream>, sent: usize) -> Result<(), String> {
+    let mut response = String::new();
+    let read = reader
+        .read_line(&mut response)
+        .map_err(|error| format!("waiting for transfer confirmation failed: {error}"))?;
+    if read == 0 {
+        // Older DropAir versions do not send a completion acknowledgement.
+        return Ok(());
+    }
+    let Some(payload) = response.trim().strip_prefix(TRANSFER_ACK_PREFIX) else {
+        return Err("device returned an invalid transfer confirmation".to_string());
+    };
+    let mut parts = payload.splitn(2, '|');
+    if parts.next() != Some("complete") {
+        return Err("device rejected the transfer".to_string());
+    }
+    let count = parts
+        .next()
+        .and_then(|value| value.parse::<usize>().ok())
+        .ok_or_else(|| "device returned an invalid item count".to_string())?;
+    if count != sent {
+        return Err(format!("device confirmed {count} of {sent} item(s)"));
+    }
+    Ok(())
 }
 
 fn peer_endpoint(address: &str, port: u16) -> String {
@@ -601,6 +741,7 @@ pub fn add_manual_peer(
     }
     let peers = state.peers.clone();
     drop(state);
+    let _ = save_peers(&app);
     let _ = app.emit("peers-changed", peers);
     Ok(peer)
 }
@@ -616,6 +757,7 @@ pub fn remove_peer(peer_id: String, app: tauri::AppHandle) -> Result<(), String>
     }
     let peers = state.peers.clone();
     drop(state);
+    let _ = save_peers(&app);
     let _ = app.emit("peers-changed", peers);
     Ok(())
 }
@@ -636,6 +778,7 @@ pub fn set_peer_linked(
     peer.linked = linked;
     let peers = state.peers.clone();
     drop(state);
+    let _ = save_peers(&app);
     let _ = app.emit("peers-changed", &peers);
     Ok(peers)
 }

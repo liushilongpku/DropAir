@@ -55,8 +55,9 @@ files and text between devices:
 
 - Discovery: every instance broadcasts its identity over UDP port `47653`.
 - Transfer: files and text are streamed over TCP port `47654`.
-- Received files and text are stored under DropAir's app data `received`
-  directory and added to the local Shelf automatically.
+- Received files are stored under DropAir's app data `received` directory and
+  added to the local Shelf automatically. Received text is restored as a text
+  Shelf item.
 
 Open **Devices** in the main window to see discovered devices and send the
 current Shelf items to a selected device. The main toolbar **Send** button uses
@@ -69,10 +70,11 @@ IP address or resolvable host name and TCP port. Manual entries remain available
 until removed and are replaced by an automatic entry when the same endpoint is
 later discovered.
 
-Discovered devices can be linked explicitly with **Add**. Only linked devices
-are available as transfer targets; each linked row has a **Test** action. The
-compact Shelf includes a text input for direct paste and a per-item send button
-using the linked-device selector in its header.
+Discovered devices can be linked explicitly with **Add**. Linked and manually
+added devices are saved locally and restored after restarting DropAir. Only
+linked devices are available as transfer targets; each linked row has a **Test**
+action. The compact Shelf includes a text input for direct paste and a per-item
+send button using the linked-device selector in its header.
 
 The Shelf supports individual item sending and a multi-select batch mode. The
 sidebar keeps **Sent** and **Received** transfer history. Discovery sends to the
@@ -84,6 +86,9 @@ Limitations of this preview:
 
 - Transfers are unencrypted and unauthenticated; use it only on trusted LANs.
 - Directory and "other" Shelf items are skipped; files and text are supported.
+- The transfer is acknowledged after the receiver has written all items
+  successfully; incomplete files are removed instead of being added to the
+  Shelf.
 - Discovery uses subnet broadcast, so devices on different subnets or over WAN
   are not found yet. ZeroTier virtual LAN support is planned.
 - On Windows, the first inbound transfer may trigger a firewall prompt; allow
