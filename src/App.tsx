@@ -97,7 +97,18 @@ type TransferSelfCheck = {
   checks: TransferCheck[];
 };
 
-type MainView = "shelf" | "devices" | "settings";
+type MainView = "shelf" | "devices" | "sent" | "received" | "settings";
+
+type TransferEvent = {
+  peerId: string;
+  state: "sent" | "received" | "error";
+  message: string;
+};
+
+type TransferRecord = TransferEvent & {
+  id: string;
+  at: number;
+};
 
 function App() {
   const [items, setItems] = useState<ShelfItem[]>([]);
@@ -114,6 +125,10 @@ function App() {
   const [settingsReady, setSettingsReady] = useState(false);
   const [peers, setPeers] = useState<PeerInfo[]>([]);
   const [selectedPeerId, setSelectedPeerId] = useState<string | null>(null);
+  const [selectedItemIds, setSelectedItemIds] = useState<number[]>([]);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [sentRecords, setSentRecords] = useState<TransferRecord[]>([]);
+  const [receivedRecords, setReceivedRecords] = useState<TransferRecord[]>([]);
   const [transferStatusInfo, setTransferStatusInfo] = useState<TransferStatusInfo | null>(null);
   const [transferSelfCheck, setTransferSelfCheck] = useState<TransferSelfCheck | null>(null);
   const [isCheckingTransfer, setIsCheckingTransfer] = useState(false);
@@ -142,6 +157,25 @@ function App() {
   }, []);
 
   useEffect(() => {
+    try {
+      const sent = localStorage.getItem("dropair.sent-records");
+      const received = localStorage.getItem("dropair.received-records");
+      if (sent) setSentRecords(JSON.parse(sent) as TransferRecord[]);
+      if (received) setReceivedRecords(JSON.parse(received) as TransferRecord[]);
+    } catch {
+      // Ignore malformed history and continue with an empty view.
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("dropair.sent-records", JSON.stringify(sentRecords));
+  }, [sentRecords]);
+
+  useEffect(() => {
+    localStorage.setItem("dropair.received-records", JSON.stringify(receivedRecords));
+  }, [receivedRecords]);
+
+  useEffect(() => {
     let unlistenPeers: (() => void) | undefined;
     let unlistenTransfer: (() => void) | undefined;
     void listen<PeerInfo[]>("peers-changed", (event) => setPeers(event.payload)).then(
@@ -149,7 +183,15 @@ function App() {
         unlistenPeers = nextUnlisten;
       }
     );
-    void listen<{ message: string }>("transfer-status", (event) => setStatus(event.payload.message)).then(
+    void listen<TransferEvent>("transfer-status", (event) => {
+      const record = { ...event.payload, id: `${Date.now()}-${Math.random()}`, at: Date.now() };
+      setStatus(event.payload.message);
+      if (event.payload.state === "sent") {
+        setSentRecords((records) => [record, ...records].slice(0, 100));
+      } else if (event.payload.state === "received") {
+        setReceivedRecords((records) => [record, ...records].slice(0, 100));
+      }
+    }).then(
       (nextUnlisten) => {
         unlistenTransfer = nextUnlisten;
       }
@@ -421,6 +463,23 @@ function App() {
     }
   }
 
+  function toggleItemSelection(id: number) {
+    setSelectedItemIds((ids) => (ids.includes(id) ? ids.filter((itemId) => itemId !== id) : [...ids, id]));
+  }
+
+  async function sendSelectedItems() {
+    const peerId = linkedPeers.some((peer) => peer.id === selectedPeerId)
+      ? selectedPeerId
+      : linkedPeers[0]?.id;
+    if (!peerId) {
+      setStatus("Add a linked device first");
+      return;
+    }
+    await sendShelfItems(peerId, selectedItemIds);
+    setSelectedItemIds([]);
+    setSelectionMode(false);
+  }
+
   async function togglePeerLinked(peer: PeerInfo) {
     try {
       const nextPeers = await invoke<PeerInfo[]>("set_peer_linked", {
@@ -673,6 +732,10 @@ function App() {
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
+        <span className="shake-shelf-resize-edge is-top" aria-hidden="true" />
+        <span className="shake-shelf-resize-edge is-right" aria-hidden="true" />
+        <span className="shake-shelf-resize-edge is-bottom" aria-hidden="true" />
+        <span className="shake-shelf-resize-edge is-left" aria-hidden="true" />
         <div className="shake-shelf-topline">
           <span className="shake-shelf-drag-handle" onMouseDown={startShakeShelfDrag}>
             DropAir Shelf
@@ -725,7 +788,7 @@ function App() {
               }
             }}
             placeholder="Paste text here…"
-            rows={2}
+            rows={1}
             aria-label="Paste text into Shelf"
           />
           <button
@@ -762,11 +825,6 @@ function App() {
                 onMouseDown={
                   item.kind === "file" && platformCapabilities?.nativeFileDragSupported
                     ? (event) => beginNativeFileDrag(event, item.path)
-                    : undefined
-                }
-                onDoubleClick={
-                  item.kind !== "text"
-                    ? () => void openShelfPath(item.path)
                     : undefined
                 }
               >
@@ -875,6 +933,22 @@ function App() {
             Devices
           </button>
           <button
+            className={`nav-item${mainView === "sent" ? " is-active" : ""}`}
+            type="button"
+            onClick={() => setMainView("sent")}
+          >
+            <Send size={18} />
+            Sent
+          </button>
+          <button
+            className={`nav-item${mainView === "received" ? " is-active" : ""}`}
+            type="button"
+            onClick={() => setMainView("received")}
+          >
+            <FolderOpen size={18} />
+            Received
+          </button>
+          <button
             className={`nav-item${mainView === "settings" ? " is-active" : ""}`}
             type="button"
             onClick={() => setMainView("settings")}
@@ -938,6 +1012,28 @@ function App() {
               <Trash2 size={18} />
             </button>
             <button
+              className={`secondary-button${selectionMode ? " is-linked" : ""}`}
+              type="button"
+              onClick={() => {
+                setSelectionMode((enabled) => !enabled);
+                setSelectedItemIds([]);
+              }}
+            >
+              {selectionMode ? "Cancel select" : "Select items"}
+            </button>
+            {selectionMode ? (
+              <button
+                className="primary-button"
+                type="button"
+                disabled={selectedItemIds.length === 0 || linkedPeers.length === 0 || isBusy}
+                title="Send selected items"
+                onClick={() => void sendSelectedItems()}
+              >
+                <Send size={18} />
+                Send selected ({selectedItemIds.length})
+              </button>
+            ) : (
+            <button
               className="primary-button"
               type="button"
               disabled={items.length === 0 || linkedPeers.length === 0 || isBusy}
@@ -952,6 +1048,7 @@ function App() {
               <Send size={18} />
               Send
             </button>
+            )}
           </div>
         </header>
 
@@ -970,7 +1067,7 @@ function App() {
             <div className="item-list">
               {items.map((item) => (
                 <article
-                  className={`shelf-item${item.kind === "text" ? " is-text" : ""}`}
+                  className={`shelf-item${item.kind === "text" ? " is-text" : ""}${selectionMode ? " is-selecting" : ""}`}
                   key={item.id}
                   draggable={item.kind === "text"}
                   onDragStart={
@@ -978,12 +1075,16 @@ function App() {
                       ? (event) => beginTextDrag(event, item.content as string)
                       : undefined
                   }
-                  onDoubleClick={
-                    item.kind === "file" || item.kind === "directory"
-                      ? () => void openShelfPath(item.path)
-                      : undefined
-                  }
                 >
+                  {selectionMode && item.kind !== "directory" && (
+                    <input
+                      className="item-select-checkbox"
+                      type="checkbox"
+                      checked={selectedItemIds.includes(item.id)}
+                      onChange={() => toggleItemSelection(item.id)}
+                      aria-label={`Select ${item.name}`}
+                    />
+                  )}
                   <div className="item-icon" aria-hidden="true">
                     {item.kind === "directory" ? <Folder size={20} /> : <FileText size={20} />}
                   </div>
@@ -1015,6 +1116,21 @@ function App() {
                         </button>
                       </>
                     )}
+                    <button
+                      className="icon-button small"
+                      type="button"
+                      onClick={() => {
+                        const peerId = linkedPeers.some((peer) => peer.id === selectedPeerId)
+                          ? selectedPeerId
+                          : linkedPeers[0]?.id;
+                        if (peerId && item.kind !== "directory") void sendShelfItems(peerId, [item.id]);
+                      }}
+                      disabled={item.kind === "directory" || linkedPeers.length === 0 || isBusy}
+                      title="Send item"
+                      aria-label={`Send ${item.name}`}
+                    >
+                      <Send size={16} />
+                    </button>
                     <button
                       className="icon-button small"
                       type="button"
@@ -1238,6 +1354,36 @@ function App() {
               )}
             </div>
           )}
+        </section>
+      ) : mainView === "sent" || mainView === "received" ? (
+        <section className="workspace" aria-label={`${mainView} history`}>
+          <header className="toolbar">
+            <div>
+              <p className="eyebrow">Transfer history</p>
+              <h1>{mainView === "sent" ? "Sent" : "Received"}</h1>
+            </div>
+          </header>
+          <div className="history-list">
+            {(mainView === "sent" ? sentRecords : receivedRecords).length === 0 ? (
+              <div className="empty-state">
+                <FileArchive size={34} />
+                <strong>No transfers yet</strong>
+                <span>Completed transfers will appear here.</span>
+              </div>
+            ) : (
+              (mainView === "sent" ? sentRecords : receivedRecords).map((record) => (
+                <article className="history-row" key={record.id}>
+                  <div className="item-icon" aria-hidden="true">
+                    {mainView === "sent" ? <Send size={20} /> : <FolderOpen size={20} />}
+                  </div>
+                  <div className="item-copy">
+                    <strong>{record.message}</strong>
+                    <span>{new Date(record.at).toLocaleString()}</span>
+                  </div>
+                </article>
+              ))
+            )}
+          </div>
         </section>
       ) : (
         <section className="workspace settings-workspace" aria-label="Settings">

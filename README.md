@@ -74,6 +74,12 @@ are available as transfer targets; each linked row has a **Test** action. The
 compact Shelf includes a text input for direct paste and a per-item send button
 using the linked-device selector in its header.
 
+The Shelf supports individual item sending and a multi-select batch mode. The
+sidebar keeps **Sent** and **Received** transfer history. Discovery sends to the
+directed broadcast address of every local IPv4 interface as well as the normal
+LAN broadcast, which also covers virtual adapters such as ZeroTier when the
+adapter permits broadcast traffic.
+
 Limitations of this preview:
 
 - Transfers are unencrypted and unauthenticated; use it only on trusted LANs.

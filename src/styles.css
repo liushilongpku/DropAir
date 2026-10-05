@@ -99,7 +99,8 @@ kbd {
 .shake-shelf-paste textarea {
   min-width: 0;
   flex: 1 1 auto;
-  resize: vertical;
+  height: 28px;
+  resize: none;
   padding: 6px 7px;
   border: 1px solid #cbded3;
   border-radius: 5px;
@@ -125,6 +126,10 @@ kbd {
 .shake-shelf-paste-button {
   align-self: stretch;
   padding: 0 8px;
+}
+
+.shake-shelf-paste textarea::placeholder {
+  color: #7b8984;
 }
 
 .shake-shelf-paste-button:disabled,
@@ -702,6 +707,16 @@ h1 {
   background: #fafbf9;
 }
 
+.shelf-item.is-selecting {
+  grid-template-columns: 20px 44px minmax(0, 1fr) auto;
+}
+
+.item-select-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: #11645b;
+}
+
 .item-icon {
   display: grid;
   place-items: center;
@@ -741,6 +756,72 @@ h1 {
   color: #52645e;
   font-size: 13px;
   white-space: nowrap;
+}
+
+.history-list {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.history-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid #dfe5df;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.shake-shelf-resize-edge {
+  position: absolute;
+  z-index: 5;
+  display: block;
+  pointer-events: auto;
+}
+
+.shake-shelf-resize-edge.is-top,
+.shake-shelf-resize-edge.is-bottom {
+  right: 6px;
+  left: 6px;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.shake-shelf-resize-edge.is-top {
+  top: 0;
+}
+
+.shake-shelf-resize-edge.is-bottom {
+  bottom: 0;
+}
+
+.shake-shelf-resize-edge.is-left,
+.shake-shelf-resize-edge.is-right {
+  top: 6px;
+  bottom: 6px;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.shake-shelf-resize-edge.is-left {
+  left: 0;
+}
+
+.shake-shelf-resize-edge.is-right {
+  right: 0;
+}
+
+.shake-shelf-resize-edge.is-top:hover,
+.shake-shelf-resize-edge.is-bottom:hover {
+  cursor: ns-resize;
+}
+
+.shake-shelf-resize-edge.is-left:hover,
+.shake-shelf-resize-edge.is-right:hover {
+  cursor: ew-resize;
 }
 
 .summary-bar {
@@ -966,6 +1047,10 @@ h1 {
 
   .shelf-item {
     grid-template-columns: 44px minmax(0, 1fr);
+  }
+
+  .shelf-item.is-selecting {
+    grid-template-columns: 20px 44px minmax(0, 1fr);
   }
 
   .item-meta {

@@ -1,7 +1,7 @@
 use crate::settings::SettingsStore;
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
+use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -147,7 +147,11 @@ fn handle_discovery_message(app: &AppHandle, message: &str, address: String) {
         .unwrap_or(false);
     let peer = PeerInfo {
         id: id.to_string(),
-        name: name.to_string(),
+        name: if name.trim().is_empty() {
+            format!("DropAir device ({address})")
+        } else {
+            name.to_string()
+        },
         address,
         port,
         last_seen: now_millis(),
@@ -219,8 +223,23 @@ fn send_discovery_announcement(app: &AppHandle, socket: &UdpSocket) -> Result<()
     socket
         .send_to(message.as_bytes(), ("127.0.0.1", DISCOVERY_PORT))
         .map_err(|error| error.to_string())?;
+    if let Ok(interfaces) = if_addrs::get_if_addrs() {
+        for interface in interfaces {
+            let if_addrs::IfAddr::V4(address) = interface.addr else {
+                continue;
+            };
+            let broadcast = directed_broadcast(address.ip, address.netmask);
+            if broadcast != Ipv4Addr::new(255, 255, 255, 255) {
+                let _ = socket.send_to(message.as_bytes(), (broadcast, DISCOVERY_PORT));
+            }
+        }
+    }
     DISCOVERY_BROADCAST_UP.store(true, Ordering::Relaxed);
     Ok(())
+}
+
+fn directed_broadcast(ip: Ipv4Addr, netmask: Ipv4Addr) -> Ipv4Addr {
+    Ipv4Addr::from(u32::from(ip) | !u32::from(netmask))
 }
 
 fn listen_for_transfers(app: AppHandle) {
