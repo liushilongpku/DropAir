@@ -419,6 +419,15 @@ fn begin_native_file_drag(path: String, app: tauri::AppHandle) -> Result<(), Str
 }
 
 #[tauri::command]
+fn capture_dragged_text() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    return shake_shelf::dragged_plain_text();
+
+    #[cfg(not(target_os = "macos"))]
+    None
+}
+
+#[tauri::command]
 fn open_shelf_path(path: String) -> Result<(), String> {
     run_platform_open(&path, false)
 }
@@ -676,6 +685,7 @@ pub fn run() {
             open_main_window,
             start_shake_shelf_drag,
             begin_native_file_drag,
+            capture_dragged_text,
             open_shelf_path,
             reveal_shelf_path,
             transfer::list_peers,

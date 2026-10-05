@@ -101,7 +101,7 @@ fn get_or_create(app: &AppHandle) -> Result<WebviewWindow, String> {
     )
     .title("DropAir Shelf")
     .inner_size(320.0, 240.0)
-    .min_inner_size(180.0, 130.0)
+    .min_inner_size(240.0, 210.0)
     .decorations(false)
     .resizable(true)
     .always_on_top(true)

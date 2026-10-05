@@ -23,8 +23,8 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 const SHAKE_WINDOW_MS: u128 = 1500;
 const TRIGGER_COOLDOWN: Duration = Duration::from_secs(2);
 const FRAME_SAVE_DELAY: Duration = Duration::from_millis(500);
-const MIN_SHELF_WIDTH: f64 = 150.0;
-const MIN_SHELF_HEIGHT: f64 = 130.0;
+const MIN_SHELF_WIDTH: f64 = 240.0;
+const MIN_SHELF_HEIGHT: f64 = 210.0;
 const MONITOR_STARTING: u8 = 0;
 const MONITOR_LISTENING: u8 = 1;
 const MONITOR_PERMISSION_REQUIRED: u8 = 2;
@@ -136,7 +136,7 @@ pub fn setup(app: &AppHandle, settings: &AppSettings) -> tauri::Result<()> {
         WebviewUrl::App("index.html?shelf=1".into()),
     )
     .title("DropAir Shelf")
-    .inner_size(MIN_SHELF_WIDTH, MIN_SHELF_HEIGHT)
+    .inner_size(320.0, 240.0)
     .min_inner_size(MIN_SHELF_WIDTH, MIN_SHELF_HEIGHT)
     .resizable(true)
     .decorations(false)
@@ -198,7 +198,7 @@ fn create_shelf_panel(
         .unwrap_or_else(|| {
             NSRect::new(
                 source_window.frame().origin,
-                NSSize::new(MIN_SHELF_WIDTH, MIN_SHELF_HEIGHT),
+                NSSize::new(320.0, 240.0),
             )
         });
     let style = NSWindowStyleMask::Resizable | NSWindowStyleMask::NonactivatingPanel;
@@ -436,7 +436,7 @@ fn is_dragging_content() -> bool {
     }
 }
 
-fn dragged_plain_text() -> Option<String> {
+pub fn dragged_plain_text() -> Option<String> {
     // AppKit owns these immutable pasteboard name and type constants for the process lifetime.
     let text = unsafe {
         let pasteboard = NSPasteboard::pasteboardWithName(NSPasteboardNameDrag);

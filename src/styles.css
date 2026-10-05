@@ -21,8 +21,8 @@ body {
 }
 
 body.shake-shelf-body {
-  min-width: 150px;
-  min-height: 130px;
+  min-width: 240px;
+  min-height: 210px;
 }
 
 button {
@@ -45,8 +45,8 @@ kbd {
 
 .shake-shelf {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  min-height: 100vh;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  height: 100vh;
   overflow: hidden;
   border: 1px solid #a9c8bb;
   border-radius: 8px;
@@ -72,14 +72,22 @@ kbd {
   font-weight: 700;
 }
 
+.shake-shelf-drop-space {
+  min-height: 34px;
+  cursor: move;
+  user-select: none;
+}
+
 .shake-shelf-actions {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.shake-shelf-peer-select {
-  max-width: 112px;
+.shake-shelf-item-peer-select {
+  flex: 0 1 100px;
+  min-width: 72px;
+  max-width: 100px;
   min-height: 25px;
   padding: 0 4px;
   border: 1px solid #cbded3;
@@ -96,7 +104,7 @@ kbd {
   border-bottom: 1px solid #dcebe2;
 }
 
-.shake-shelf-paste textarea {
+.shake-shelf-paste input {
   min-width: 0;
   flex: 1 1 auto;
   height: 28px;
@@ -110,7 +118,6 @@ kbd {
   font-size: 12px;
 }
 
-.shake-shelf-paste-button,
 .shake-shelf-send {
   display: inline-flex;
   align-items: center;
@@ -123,19 +130,31 @@ kbd {
   font-weight: 700;
 }
 
-.shake-shelf-paste-button {
-  align-self: stretch;
-  padding: 0 8px;
-}
-
-.shake-shelf-paste textarea::placeholder {
+.shake-shelf-paste input::placeholder {
   color: #7b8984;
 }
 
-.shake-shelf-paste-button:disabled,
 .shake-shelf-send:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+
+.shake-shelf-statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 25px;
+  padding: 0 10px;
+  border-top: 1px solid #dcebe2;
+  color: #698078;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.shake-shelf-statusbar span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .shake-shelf-send {
@@ -195,7 +214,7 @@ kbd {
   place-content: center;
   justify-items: center;
   gap: 7px;
-  min-height: 94px;
+  min-height: 0;
   color: #4d756b;
   font-size: 14px;
 }
@@ -231,6 +250,8 @@ kbd {
 }
 
 .shake-shelf-item span {
+  flex: 1 1 0;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -264,10 +285,6 @@ kbd {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  .shake-shelf-actions > span {
-    display: none;
   }
 
   .shake-shelf-items {

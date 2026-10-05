@@ -76,8 +76,12 @@ with both `192.*` and `10.*` interfaces stays as one device and transfer tries
 the known addresses in order. Linked and manually added devices are saved
 locally and restored after restarting DropAir. Only linked devices are
 available as transfer targets; each linked row has a **Test** action. The
-compact Shelf includes a text input for direct paste and a per-item send button
-using the linked-device selector in its header.
+compact Shelf adds pasted text immediately through its single-line paste bar;
+typed text can be added with Enter. Each item's send icon reveals its own
+linked-device selector. The top includes blank space for moving the window,
+the middle scrolls through queued items, and the bottom shows queue and status.
+On macOS, text drops also read the native drag pasteboard when the WebView
+reports no file paths.
 
 The device name is read from the operating system (Windows hostname or macOS
 Computer Name) and can be changed from Settings. This name is the one shown to
