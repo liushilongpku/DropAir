@@ -9,11 +9,11 @@ use objc2::{
     define_class,
     rc::Retained,
     runtime::{NSObject, NSObjectProtocol, ProtocolObject},
-    MainThreadMarker, MainThreadOnly,
+    AnyThread, MainThreadMarker, MainThreadOnly,
 };
 use objc2_app_kit::{
     NSApplication, NSBackingStoreType, NSDraggingContext, NSDraggingItem, NSDraggingSession,
-    NSDraggingSource, NSDragOperation, NSEvent, NSEventType, NSPanel,
+    NSDraggingSource, NSDragOperation, NSEvent, NSPanel,
     NSPasteboard, NSPasteboardNameDrag, NSPasteboardTypeFileURL, NSPasteboardTypeString,
     NSStatusWindowLevel, NSView, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
 };
