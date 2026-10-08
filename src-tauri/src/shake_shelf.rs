@@ -46,7 +46,7 @@ static SHAKE_ENABLED: AtomicBool = AtomicBool::new(true);
 static SHAKE_SENSITIVITY: AtomicU8 = AtomicU8::new(3);
 static SHELF_FRAME_TRACKER: OnceLock<Mutex<FrameTracker>> = OnceLock::new();
 
-define_class!
+define_class! {
     #[unsafe(super(NSObject))]
     #[thread_kind = MainThreadOnly]
     #[name = "DropAirDragSource"]
@@ -72,6 +72,7 @@ define_class!
         ) {
         }
     }
+}
 
 impl DropAirDragSource {
     fn new(marker: MainThreadMarker) -> Retained<Self> {
