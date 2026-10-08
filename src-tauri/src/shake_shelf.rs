@@ -649,7 +649,7 @@ fn begin_file_drag_on_main_thread(path: &str) -> Result<(), String> {
         NSDraggingItem::alloc(),
         &ProtocolObject::from_retained(file_url),
     );
-    dragging_item.setDraggingFrame_contents(source_rect, None);
+    unsafe { dragging_item.setDraggingFrame_contents(source_rect, None) };
     let dragging_items = NSMutableArray::new();
     dragging_items.addObject(&*dragging_item);
     let drag_source = DropAirDragSource::new(marker);
