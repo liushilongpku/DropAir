@@ -9,11 +9,11 @@ use objc2::{
     define_class,
     rc::Retained,
     runtime::{NSObject, NSObjectProtocol, ProtocolObject},
-    AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly,
+    MainThreadMarker, MainThreadOnly,
 };
 use objc2_app_kit::{
     NSApplication, NSBackingStoreType, NSDraggingContext, NSDraggingItem, NSDraggingSession,
-    NSDraggingSource, NSDragOperation, NSEvent, NSEventModifierFlags, NSEventType, NSPanel,
+    NSDraggingSource, NSDragOperation, NSEvent, NSEventType, NSPanel,
     NSPasteboard, NSPasteboardNameDrag, NSPasteboardTypeFileURL, NSPasteboardTypeString,
     NSStatusWindowLevel, NSView, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
 };
@@ -50,6 +50,7 @@ define_class! {
     #[unsafe(super(NSObject))]
     #[thread_kind = MainThreadOnly]
     #[name = "DropAirDragSource"]
+    #[ivars = ()]
     struct DropAirDragSource;
 
     unsafe impl NSObjectProtocol for DropAirDragSource {}
@@ -76,7 +77,7 @@ define_class! {
 
 impl DropAirDragSource {
     fn new(marker: MainThreadMarker) -> Retained<Self> {
-        let this = Self::alloc(marker);
+        let this = Self::alloc(marker).set_ivars(());
         unsafe { objc2::msg_send![super(this), init] }
     }
 }
@@ -637,29 +638,12 @@ fn begin_file_drag_on_main_thread(path: &str) -> Result<(), String> {
         .contentView()
         .ok_or_else(|| "shake shelf panel has no content view".to_string())?;
     let file_url = NSURL::fileURLWithPath_isDirectory(&NSString::from_str(path), false);
-    let current_position = panel.mouseLocationOutsideOfEventStream();
+    let event = NSApplication::sharedApplication(marker)
+        .currentEvent()
+        .ok_or_else(|| "no active mouse event was found".to_string())?;
+    let current_position = event.locationInWindow();
     let source_point = view.convertPoint_fromView(current_position, None);
     let source_rect = NSRect::new(source_point, NSSize::new(32.0, 32.0));
-
-    // The IPC call that reaches Rust is asynchronous, so the original
-    // WebView mouse event is no longer reliable here. Create the drag event
-    // explicitly so receiving apps get a normal native file drag session.
-    let timestamp = NSApplication::sharedApplication(marker)
-        .currentEvent()
-        .map(|event| event.timestamp())
-        .unwrap_or(0.0);
-    let drag_event = NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
-        NSEventType::LeftMouseDragged,
-        current_position,
-        NSEventModifierFlags::empty(),
-        timestamp,
-        panel.windowNumber(),
-        None,
-        0,
-        1,
-        1.0,
-    )
-    .ok_or_else(|| "macOS could not create a file drag event".to_string())?;
 
     let dragging_item = NSDraggingItem::initWithPasteboardWriter(
         NSDraggingItem::alloc(),
@@ -673,7 +657,7 @@ fn begin_file_drag_on_main_thread(path: &str) -> Result<(), String> {
 
     let _session = view.beginDraggingSessionWithItems_event_source(
         &dragging_items,
-        &drag_event,
+        &event,
         &drag_source,
     );
     Ok(())
