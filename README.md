@@ -83,6 +83,9 @@ the middle scrolls through queued items, and the bottom shows queue and status.
 On macOS, text drops also read the native drag pasteboard when the WebView
 reports no file paths.
 
+macOS file drag-out uses a native copy drag session with a file URL, which
+keeps external applications such as VS Code compatible with Shelf items.
+
 The device name is read from the operating system (Windows hostname or macOS
 Computer Name) and can be changed from Settings. This name is the one shown to
 other DropAir devices.

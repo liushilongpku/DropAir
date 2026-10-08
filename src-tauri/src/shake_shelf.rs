@@ -5,13 +5,19 @@ use core_graphics::event::{
     CGMouseButton, CallbackResult,
 };
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
-use objc2::{rc::Retained, MainThreadMarker, MainThreadOnly};
-use objc2_app_kit::{
-    NSApplication, NSBackingStoreType, NSEvent, NSEventType, NSPanel, NSPasteboard,
-    NSPasteboardNameDrag, NSPasteboardTypeFileURL, NSPasteboardTypeString, NSStatusWindowLevel,
-    NSView, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
+use objc2::{
+    define_class,
+    rc::Retained,
+    runtime::{NSObject, NSObjectProtocol, ProtocolObject},
+    AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly,
 };
-use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
+use objc2_app_kit::{
+    NSApplication, NSBackingStoreType, NSDraggingContext, NSDraggingItem, NSDraggingSession,
+    NSDraggingSource, NSDragOperation, NSEvent, NSEventModifierFlags, NSEventType, NSPanel,
+    NSPasteboard, NSPasteboardNameDrag, NSPasteboardTypeFileURL, NSPasteboardTypeString,
+    NSStatusWindowLevel, NSView, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
+};
+use objc2_foundation::{NSMutableArray, NSPoint, NSRect, NSSize, NSString, NSURL};
 use serde::Serialize;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering};
@@ -39,6 +45,40 @@ static SHELF_VISIBLE: AtomicBool = AtomicBool::new(false);
 static SHAKE_ENABLED: AtomicBool = AtomicBool::new(true);
 static SHAKE_SENSITIVITY: AtomicU8 = AtomicU8::new(3);
 static SHELF_FRAME_TRACKER: OnceLock<Mutex<FrameTracker>> = OnceLock::new();
+
+define_class!
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "DropAirDragSource"]
+    struct DropAirDragSource;
+
+    unsafe impl NSObjectProtocol for DropAirDragSource {}
+    unsafe impl NSDraggingSource for DropAirDragSource {
+        #[unsafe(method(draggingSession:sourceOperationMaskForDraggingContext:))]
+        unsafe fn dragging_session(
+            &self,
+            _session: &NSDraggingSession,
+            _context: NSDraggingContext,
+        ) -> NSDragOperation {
+            NSDragOperation::Copy
+        }
+
+        #[unsafe(method(draggingSession:endedAtPoint:operation:))]
+        unsafe fn dragging_session_end(
+            &self,
+            _session: &NSDraggingSession,
+            _point: NSPoint,
+            _operation: NSDragOperation,
+        ) {
+        }
+    }
+
+impl DropAirDragSource {
+    fn new(marker: MainThreadMarker) -> Retained<Self> {
+        let this = Self::alloc(marker);
+        unsafe { objc2::msg_send![super(this), init] }
+    }
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -591,29 +631,51 @@ pub fn begin_file_drag(app: &AppHandle, path: String) -> Result<(), String> {
 fn begin_file_drag_on_main_thread(path: &str) -> Result<(), String> {
     let marker =
         MainThreadMarker::new().ok_or_else(|| "not on the macOS main thread".to_string())?;
-    let event = NSApplication::sharedApplication(marker)
-        .currentEvent()
-        .ok_or_else(|| "no active mouse event was found".to_string())?;
-    if !matches!(
-        event.r#type(),
-        NSEventType::LeftMouseDown | NSEventType::LeftMouseDragged
-    ) {
-        return Err("the active event cannot start a file drag".to_string());
-    }
-    let view = shelf_panel()?
+    let panel = shelf_panel()?;
+    let view = panel
         .contentView()
         .ok_or_else(|| "shake shelf panel has no content view".to_string())?;
-    let filename = NSString::from_str(path);
-    let source_point = view.convertPoint_fromView(event.locationInWindow(), None);
+    let file_url = NSURL::fileURLWithPath_isDirectory(&NSString::from_str(path), false);
+    let current_position = panel.mouseLocationOutsideOfEventStream();
+    let source_point = view.convertPoint_fromView(current_position, None);
     let source_rect = NSRect::new(source_point, NSSize::new(32.0, 32.0));
 
-    #[allow(deprecated)]
-    let started = view.dragFile_fromRect_slideBack_event(&filename, source_rect, true, &event);
-    if started {
-        Ok(())
-    } else {
-        Err("macOS did not start the file drag".to_string())
-    }
+    // The IPC call that reaches Rust is asynchronous, so the original
+    // WebView mouse event is no longer reliable here. Create the drag event
+    // explicitly so receiving apps get a normal native file drag session.
+    let timestamp = NSApplication::sharedApplication(marker)
+        .currentEvent()
+        .map(|event| event.timestamp())
+        .unwrap_or(0.0);
+    let drag_event = NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
+        NSEventType::LeftMouseDragged,
+        current_position,
+        NSEventModifierFlags::empty(),
+        timestamp,
+        panel.windowNumber(),
+        None,
+        0,
+        1,
+        1.0,
+    )
+    .ok_or_else(|| "macOS could not create a file drag event".to_string())?;
+
+    let dragging_item = NSDraggingItem::initWithPasteboardWriter(
+        NSDraggingItem::alloc(),
+        &ProtocolObject::from_retained(file_url),
+    );
+    dragging_item.setDraggingFrame_contents(source_rect, None);
+    let dragging_items = NSMutableArray::new();
+    dragging_items.addObject(&*dragging_item);
+    let drag_source = DropAirDragSource::new(marker);
+    let drag_source = ProtocolObject::<dyn NSDraggingSource>::from_retained(drag_source);
+
+    let _session = view.beginDraggingSessionWithItems_event_source(
+        &dragging_items,
+        &drag_event,
+        &drag_source,
+    );
+    Ok(())
 }
 
 #[cfg(test)]
