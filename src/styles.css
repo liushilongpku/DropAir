@@ -1223,3 +1223,43 @@ h1 {
     width: 100%;
   }
 }
+
+.app-tooltip {
+  position: fixed;
+  z-index: 100000;
+  max-width: min(280px, calc(100vw - 20px));
+  padding: 5px 9px;
+  border-radius: 6px;
+  color: #f4f7f5;
+  background: rgba(23, 33, 29, 0.97);
+  box-shadow: 0 6px 18px rgba(15, 25, 21, 0.3);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.45;
+  text-align: center;
+  white-space: normal;
+  word-break: break-word;
+  pointer-events: none;
+  transform: translate(-50%, 0);
+}
+
+.app-tooltip.is-above {
+  transform: translate(-50%, -100%);
+}
+
+.app-tooltip::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 1px;
+  background: rgba(23, 33, 29, 0.97);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.app-tooltip.is-above::after {
+  top: auto;
+  bottom: -3px;
+}

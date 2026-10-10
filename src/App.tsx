@@ -54,6 +54,24 @@ type DropAirFile = File & {
   path?: string;
 };
 
+type TooltipState = {
+  text: string;
+  x: number;
+  y: number;
+  placement: "above" | "below";
+} | null;
+
+const TOOLTIP_SELECTOR = [
+  "button",
+  "a[href]",
+  "input",
+  "select",
+  "textarea",
+  "[role='switch']",
+  "[role='button']",
+  "[data-tooltip]"
+].join(", ");
+
 type ShakeDiagnostics = {
   mouseDowns: number;
   motionSamples: number;
@@ -128,6 +146,7 @@ type TransferRecord = TransferEvent & {
 function App() {
   const [items, setItems] = useState<ShelfItem[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [tooltip, setTooltip] = useState<TooltipState>(null);
   const [status, setStatus] = useState("Ready");
   const [isBusy, setIsBusy] = useState(false);
   const [shakeStatus, setShakeStatus] = useState("starting");
@@ -172,6 +191,68 @@ function App() {
 
   useEffect(() => {
     void refreshShelf();
+  }, []);
+
+  useEffect(() => {
+    const readTooltip = (element: Element) => {
+      const explicit = element.getAttribute("data-tooltip");
+      if (explicit) return explicit;
+      const label = element.getAttribute("aria-label");
+      if (label) return label;
+      return null;
+    };
+
+    const showTooltipFor = (target: EventTarget | null) => {
+      if (!(target instanceof Element)) {
+        setTooltip(null);
+        return;
+      }
+      const element = target.closest(TOOLTIP_SELECTOR);
+      if (!element) {
+        setTooltip(null);
+        return;
+      }
+      const text = readTooltip(element);
+      if (!text) {
+        setTooltip(null);
+        return;
+      }
+      const rect = element.getBoundingClientRect();
+      const placement = rect.bottom + 48 > window.innerHeight ? "above" : "below";
+      const maxWidth = Math.min(280, window.innerWidth - 16);
+      const estimatedWidth = Math.min(maxWidth, text.length * 6.5 + 20);
+      const halfWidth = estimatedWidth / 2 + 8;
+      const centerX = rect.left + rect.width / 2;
+      setTooltip({
+        text,
+        x: Math.min(Math.max(centerX, halfWidth), window.innerWidth - halfWidth),
+        y: placement === "below" ? rect.bottom + 8 : rect.top - 8,
+        placement
+      });
+    };
+
+    const handleMouseOver = (event: globalThis.MouseEvent) => showTooltipFor(event.target);
+    const handleMouseOut = (event: globalThis.MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const element = target.closest(TOOLTIP_SELECTOR);
+      if (element && element.contains(event.relatedTarget as Node | null)) return;
+      setTooltip(null);
+    };
+    const hideTooltip = () => setTooltip(null);
+
+    document.addEventListener("mouseover", handleMouseOver);
+    document.addEventListener("mouseout", handleMouseOut);
+    document.addEventListener("pointerdown", hideTooltip, true);
+    window.addEventListener("scroll", hideTooltip, true);
+    window.addEventListener("blur", hideTooltip);
+    return () => {
+      document.removeEventListener("mouseover", handleMouseOver);
+      document.removeEventListener("mouseout", handleMouseOut);
+      document.removeEventListener("pointerdown", hideTooltip, true);
+      window.removeEventListener("scroll", hideTooltip, true);
+      window.removeEventListener("blur", hideTooltip);
+    };
   }, []);
 
   useEffect(() => {
@@ -802,7 +883,7 @@ function App() {
         <span className="shake-shelf-resize-edge is-bottom" aria-hidden="true" />
         <span className="shake-shelf-resize-edge is-left" aria-hidden="true" />
         <div className="shake-shelf-topline">
-          <span className="shake-shelf-drag-handle" onMouseDown={startShakeShelfDrag}>
+          <span className="shake-shelf-drag-handle" onMouseDown={startShakeShelfDrag} data-tooltip="Drag to move the Shelf">
             DropAir Shelf
           </span>
           <div className="shake-shelf-actions">
@@ -810,7 +891,7 @@ function App() {
               className="shake-shelf-icon"
               type="button"
               onClick={() => void openMainWindow()}
-              title="Open DropAir"
+              data-tooltip="Open DropAir"
               aria-label="Open DropAir"
             >
               <PanelTopOpen size={14} />
@@ -819,7 +900,7 @@ function App() {
               className="shake-shelf-close"
               type="button"
               onClick={() => void hideShakeShelf()}
-              title="Close Shelf"
+              data-tooltip="Close Shelf"
               aria-label="Close Shelf"
             >
               <X size={14} />
@@ -865,6 +946,13 @@ function App() {
               <div
                 className={`shake-shelf-item${item.kind === "file" ? " is-file" : ""}${item.kind === "text" ? " is-text" : ""}`}
                 key={item.id}
+                data-tooltip={
+                  item.kind === "text"
+                    ? "Drag to copy this text, or use Send"
+                    : item.kind === "file"
+                      ? "Drag this file to another app, or use Send"
+                      : undefined
+                }
                 draggable={
                   item.kind === "text" ||
                   (isWindows && item.kind === "file" && !platformCapabilities?.nativeFileDragSupported)
@@ -890,7 +978,7 @@ function App() {
                     <button
                       className="shake-shelf-icon"
                       type="button"
-                      title={`Open ${item.name}`}
+                      data-tooltip={`Open ${item.name}`}
                       aria-label={`Open ${item.name}`}
                       draggable={false}
                       onMouseDown={(event) => event.stopPropagation()}
@@ -903,7 +991,7 @@ function App() {
                     <button
                       className="shake-shelf-icon"
                       type="button"
-                      title={isWindows ? "Show in Explorer" : "Show in Finder"}
+                      data-tooltip={isWindows ? "Show in Explorer" : "Show in Finder"}
                       aria-label={isWindows ? "Show in Explorer" : "Show in Finder"}
                       draggable={false}
                       onMouseDown={(event) => event.stopPropagation()}
@@ -953,7 +1041,7 @@ function App() {
                       setShelfSendItemId((current) => (current === item.id ? null : item.id));
                     }
                   }}
-                  title={
+                  data-tooltip={
                     linkedPeers.length === 0
                       ? "Add a linked device first"
                       : "Choose a linked device"
@@ -970,7 +1058,7 @@ function App() {
                   onDragStart={(event) => event.stopPropagation()}
                   onDoubleClick={(event) => event.stopPropagation()}
                   onClick={() => void removeItem(item.id)}
-                  title={`Remove ${item.name}`}
+                  data-tooltip={`Remove ${item.name}`}
                   aria-label={`Remove ${item.name}`}
                 >
                   <X size={14} />
@@ -983,6 +1071,7 @@ function App() {
           <span>{items.length} queued</span>
           <span>{status}</span>
         </div>
+        <TooltipBubble tooltip={tooltip} />
       </main>
     );
   }
@@ -1009,6 +1098,7 @@ function App() {
           <button
             className={`nav-item${mainView === "shelf" ? " is-active" : ""}`}
             type="button"
+            data-tooltip="Show the temporary Shelf"
             onClick={() => setMainView("shelf")}
           >
             <FileArchive size={18} />
@@ -1017,6 +1107,7 @@ function App() {
           <button
             className={`nav-item${mainView === "devices" ? " is-active" : ""}`}
             type="button"
+            data-tooltip="Discover and link nearby devices"
             onClick={() => setMainView("devices")}
           >
             <Laptop size={18} />
@@ -1025,6 +1116,7 @@ function App() {
           <button
             className={`nav-item${mainView === "sent" ? " is-active" : ""}`}
             type="button"
+            data-tooltip="Transfers you have sent"
             onClick={() => setMainView("sent")}
           >
             <Send size={18} />
@@ -1033,6 +1125,7 @@ function App() {
           <button
             className={`nav-item${mainView === "received" ? " is-active" : ""}`}
             type="button"
+            data-tooltip="Files you have received"
             onClick={() => setMainView("received")}
           >
             <FolderOpen size={18} />
@@ -1041,6 +1134,7 @@ function App() {
           <button
             className={`nav-item${mainView === "settings" ? " is-active" : ""}`}
             type="button"
+            data-tooltip="Shake, startup, and download preferences"
             onClick={() => setMainView("settings")}
           >
             <Settings2 size={18} />
@@ -1077,7 +1171,7 @@ function App() {
               type="button"
               onClick={() => void pasteText()}
               disabled={isBusy}
-              title="Paste text from clipboard"
+              data-tooltip="Paste text from clipboard"
             >
               <ClipboardPaste size={18} />
               Paste
@@ -1086,7 +1180,7 @@ function App() {
               className="icon-button"
               type="button"
               onClick={() => void testShakeShelf()}
-              title="Show Shelf"
+              data-tooltip="Show Shelf"
               aria-label="Show Shelf"
             >
               <PanelTopOpen size={18} />
@@ -1096,7 +1190,7 @@ function App() {
               type="button"
               onClick={() => void clearItems()}
               disabled={items.length === 0 || isBusy}
-              title="Clear shelf"
+              data-tooltip="Clear shelf"
               aria-label="Clear shelf"
             >
               <Trash2 size={18} />
@@ -1104,6 +1198,7 @@ function App() {
             <button
               className={`secondary-button${selectionMode ? " is-linked" : ""}`}
               type="button"
+              data-tooltip={selectionMode ? "Exit selection mode" : "Select multiple items to send"}
               onClick={() => {
                 setSelectionMode((enabled) => !enabled);
                 setSelectedItemIds([]);
@@ -1116,7 +1211,7 @@ function App() {
                 className="primary-button"
                 type="button"
                 disabled={selectedItemIds.length === 0 || linkedPeers.length === 0 || isBusy}
-                title="Send selected items"
+                data-tooltip="Send selected items"
                 onClick={() => void sendSelectedItems()}
               >
                 <Send size={18} />
@@ -1127,7 +1222,7 @@ function App() {
               className="primary-button"
               type="button"
               disabled={items.length === 0 || linkedPeers.length === 0 || isBusy}
-              title="Send to device"
+              data-tooltip="Send to device"
               onClick={() => {
                 const peerId = linkedPeers.some((peer) => peer.id === selectedPeerId)
                   ? selectedPeerId
@@ -1159,6 +1254,7 @@ function App() {
                 <article
                   className={`shelf-item${item.kind === "text" ? " is-text" : ""}${selectionMode ? " is-selecting" : ""}`}
                   key={item.id}
+                  data-tooltip={item.kind === "text" ? "Drag to copy this text" : undefined}
                   draggable={item.kind === "text"}
                   onDragStart={
                     item.kind === "text" && item.content
@@ -1191,7 +1287,7 @@ function App() {
                           className="icon-button small"
                           type="button"
                           onClick={() => void openShelfPath(item.path)}
-                          title="Open item"
+                          data-tooltip="Open item"
                           aria-label={`Open ${item.name}`}
                         >
                           <ExternalLink size={16} />
@@ -1200,7 +1296,7 @@ function App() {
                           className="icon-button small"
                           type="button"
                           onClick={() => void revealShelfPath(item.path)}
-                          title="Show in Finder"
+                          data-tooltip="Show in Finder"
                           aria-label={`Show ${item.name} in Finder`}
                         >
                           <FolderOpen size={16} />
@@ -1217,7 +1313,7 @@ function App() {
                         if (peerId && item.kind !== "directory") void sendShelfItems(peerId, [item.id]);
                       }}
                       disabled={item.kind === "directory" || linkedPeers.length === 0 || isBusy}
-                      title="Send item"
+                      data-tooltip="Send item"
                       aria-label={`Send ${item.name}`}
                     >
                       <Send size={16} />
@@ -1227,7 +1323,7 @@ function App() {
                       type="button"
                       onClick={() => void removeItem(item.id)}
                       disabled={isBusy}
-                      title="Remove item"
+                      data-tooltip="Remove item"
                       aria-label={`Remove ${item.name}`}
                     >
                       <X size={16} />
@@ -1262,6 +1358,7 @@ function App() {
               <button
                 className="secondary-button"
                 type="button"
+                data-tooltip={showManualPeerForm ? "Hide the manual add form" : "Add a device by IP address"}
                 onClick={() => setShowManualPeerForm((visible) => !visible)}
               >
                 <Laptop size={16} />
@@ -1271,6 +1368,7 @@ function App() {
                 className="secondary-button"
                 type="button"
                 disabled={isScanningDevices}
+                data-tooltip="Scan the local network for devices"
                 onClick={() => void scanLanDevices()}
               >
                 {isScanningDevices ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
@@ -1280,6 +1378,7 @@ function App() {
                 className="secondary-button"
                 type="button"
                 disabled={isCheckingTransfer}
+                data-tooltip="Check transfer listeners and connectivity"
                 onClick={() => void runTransferSelfCheck()}
               >
                 {isCheckingTransfer ? <Loader2 className="spin" size={16} /> : <ShieldCheck size={16} />}
@@ -1306,6 +1405,7 @@ function App() {
                   onChange={(event) => setManualAddress(event.target.value)}
                   placeholder="192.168.1.20"
                   autoComplete="off"
+                  data-tooltip="IP address or host name of the other device"
                 />
               </label>
               <label>
@@ -1316,6 +1416,7 @@ function App() {
                   max="65535"
                   value={manualPort}
                   onChange={(event) => setManualPort(event.target.value)}
+                  data-tooltip="TCP port the other device listens on"
                 />
               </label>
               <label>
@@ -1325,9 +1426,15 @@ function App() {
                   onChange={(event) => setManualName(event.target.value)}
                   placeholder="Other computer"
                   autoComplete="off"
+                  data-tooltip="Friendly name shown in the device list"
                 />
               </label>
-              <button className="secondary-button" type="submit" disabled={isAddingPeer}>
+              <button
+                className="secondary-button"
+                type="submit"
+                disabled={isAddingPeer}
+                data-tooltip="Add this device to the list"
+              >
                 {isAddingPeer ? <Loader2 className="spin" size={16} /> : <Laptop size={16} />}
                 Add device
               </button>
@@ -1349,6 +1456,7 @@ function App() {
                 <article
                   className={`device-row${selectedPeerId === peer.id ? " is-selected" : ""}`}
                   key={peer.id}
+                  data-tooltip="Select this device"
                   onClick={() => setSelectedPeerId(peer.id)}
                 >
                   <div className="item-icon" aria-hidden="true">
@@ -1368,7 +1476,7 @@ function App() {
                   <div className="device-actions">
                     <div
                       className={`peer-link-status${peer.linked ? " is-linked" : ""}`}
-                      title={peer.linked ? "This device is linked and available for sending" : "Link this device before sending"}
+                      data-tooltip={peer.linked ? "This device is linked and available for sending" : "Link this device before sending"}
                     >
                       <span className="peer-status-dot" aria-hidden="true" />
                       <span>{peer.linked ? "Linked" : "Not linked"}</span>
@@ -1376,6 +1484,7 @@ function App() {
                     <button
                       className="secondary-button"
                       type="button"
+                      data-tooltip={peer.linked ? "Stop sending to this device" : "Allow sending to this device"}
                       onClick={(event) => {
                         event.stopPropagation();
                         void togglePeerLinked(peer);
@@ -1387,6 +1496,7 @@ function App() {
                       className="secondary-button"
                       type="button"
                       disabled={!peer.linked || testingPeerId === peer.id}
+                      data-tooltip="Test the connection to this device"
                       onClick={(event) => {
                         event.stopPropagation();
                         void testPeerConnection(peer);
@@ -1399,6 +1509,7 @@ function App() {
                       className="secondary-button"
                       type="button"
                       disabled={!peer.linked || items.length === 0 || isBusy}
+                      data-tooltip="Send every Shelf item to this device"
                       onClick={(event) => {
                         event.stopPropagation();
                         void sendShelfItems(peer.id);
@@ -1411,7 +1522,7 @@ function App() {
                       <button
                         className="icon-button small"
                         type="button"
-                        title="Remove manual device"
+                        data-tooltip="Remove manual device"
                         aria-label={`Remove ${peer.name}`}
                         onClick={(event) => {
                           event.stopPropagation();
@@ -1517,6 +1628,7 @@ function App() {
                     role="switch"
                     aria-checked={shakeEnabled}
                     aria-label="Shake detection"
+                    data-tooltip={shakeEnabled ? "Turn shake detection off" : "Turn shake detection on"}
                     disabled={!settingsReady || isBusy}
                     onClick={() => void updateShakeEnabled()}
                   >
@@ -1569,6 +1681,7 @@ function App() {
                 role="switch"
                 aria-checked={launchAtLogin}
                 aria-label="Launch at login"
+                data-tooltip={launchAtLogin ? "Stop launching DropAir at login" : "Launch DropAir at login"}
                 disabled={!settingsReady || isBusy}
                 onClick={() => void toggleAutostart()}
               >
@@ -1594,6 +1707,7 @@ function App() {
                   className="secondary-button"
                   type="button"
                   disabled={!settingsReady || isBusy || !deviceName.trim()}
+                  data-tooltip="Save the device name"
                   onClick={() => void updateDeviceName()}
                 >
                   Save
@@ -1619,6 +1733,7 @@ function App() {
                   className="secondary-button"
                   type="button"
                   disabled={!settingsReady || isBusy || !downloadDirectory.trim()}
+                  data-tooltip="Save the download location"
                   onClick={() => void updateDownloadDirectory(downloadDirectory)}
                 >
                   Save
@@ -1627,6 +1742,7 @@ function App() {
                   className="secondary-button"
                   type="button"
                   disabled={!settingsReady || isBusy}
+                  data-tooltip="Reset to the default Downloads folder"
                   onClick={() => void updateDownloadDirectory("")}
                 >
                   Use default
@@ -1654,6 +1770,7 @@ function App() {
                   className="secondary-button"
                   type="button"
                   disabled={!settingsReady}
+                  data-tooltip="Open macOS Accessibility settings"
                   onClick={() => void openAccessibilitySettings()}
                 >
                   <ExternalLink size={16} />
@@ -1664,6 +1781,7 @@ function App() {
           </div>
         </section>
       )}
+      <TooltipBubble tooltip={tooltip} />
     </main>
   );
 }
@@ -1811,6 +1929,19 @@ function ShelfItemBadge({ item }: { item: ShelfItem }) {
   const { tone, badge } = describeShelfItem(item);
   if (!badge) return null;
   return <span className={`shelf-item-badge tone-${tone}`}>{badge}</span>;
+}
+
+function TooltipBubble({ tooltip }: { tooltip: TooltipState }) {
+  if (!tooltip) return null;
+  return (
+    <div
+      className={`app-tooltip${tooltip.placement === "above" ? " is-above" : ""}`}
+      style={{ left: tooltip.x, top: tooltip.y }}
+      role="tooltip"
+    >
+      {tooltip.text}
+    </div>
+  );
 }
 
 function formatSize(size: number | null) {
