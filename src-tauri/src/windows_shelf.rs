@@ -148,7 +148,7 @@ pub fn start_dragging(app: &AppHandle) -> Result<(), String> {
     window.start_dragging().map_err(|error| error.to_string())
 }
 
-pub fn begin_file_drag(_app: &AppHandle, _path: String) -> Result<(), String> {
+pub fn begin_file_drag(_app: &AppHandle, _paths: Vec<String>) -> Result<(), String> {
     Err("Windows uses the Shelf item's URI drag gesture for file drag-out".to_string())
 }
 

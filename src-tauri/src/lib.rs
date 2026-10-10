@@ -407,12 +407,12 @@ fn start_shake_shelf_drag(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn begin_native_file_drag(path: String, app: tauri::AppHandle) -> Result<(), String> {
+fn begin_native_file_drag(paths: Vec<String>, app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    return shake_shelf::begin_file_drag(&app, path);
+    return shake_shelf::begin_file_drag(&app, paths);
 
     #[cfg(target_os = "windows")]
-    return windows_shelf::begin_file_drag(&app, path);
+    return windows_shelf::begin_file_drag(&app, paths);
 
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     Err("native file drag is currently available only on macOS".to_string())

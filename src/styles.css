@@ -209,6 +209,11 @@ kbd {
   background: #deebe4;
 }
 
+.shake-shelf-icon.is-active {
+  color: #11645b;
+  background: #deebe4;
+}
+
 .shake-shelf-empty {
   display: grid;
   place-content: center;
@@ -222,9 +227,9 @@ kbd {
 .shake-shelf-items {
   display: grid;
   align-content: start;
-  gap: 7px;
+  gap: 2px;
   min-height: 0;
-  padding: 10px 12px;
+  padding: 6px;
   overflow-y: auto;
 }
 
@@ -233,14 +238,36 @@ kbd {
   align-items: center;
   gap: 8px;
   min-width: 0;
+  padding: 4px 6px;
+  border-radius: 6px;
   color: #315d52;
   font-size: 13px;
+}
+
+.shake-shelf-item.is-selected {
+  background: #deebe4;
+}
+
+.shake-shelf-select {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: #11645b;
 }
 
 .shake-shelf-item.is-file,
 .shake-shelf-item.is-text,
 .shelf-item.is-text {
   cursor: grab;
+}
+
+.shake-shelf-item.is-draggable {
+  cursor: grab;
+}
+
+.shake-shelf-item.is-draggable:active {
+  cursor: grabbing;
 }
 
 .shake-shelf-item.is-file:active,

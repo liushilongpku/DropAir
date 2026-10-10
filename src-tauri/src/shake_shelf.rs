@@ -611,13 +611,20 @@ pub fn start_dragging(app: &AppHandle) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-pub fn begin_file_drag(app: &AppHandle, path: String) -> Result<(), String> {
-    if !Path::new(&path).is_file() {
-        return Err("only existing files can be dragged out".to_string());
+pub fn begin_file_drag(app: &AppHandle, paths: Vec<String>) -> Result<(), String> {
+    let paths: Vec<String> = paths
+        .into_iter()
+        .filter(|path| {
+            let path = Path::new(path);
+            path.is_file() || path.is_dir()
+        })
+        .collect();
+    if paths.is_empty() {
+        return Err("no existing files can be dragged out".to_string());
     }
 
     if MainThreadMarker::new().is_some() {
-        return begin_file_drag_on_main_thread(&path);
+        return begin_file_drag_on_main_thread(&paths);
     }
 
     let window = app
@@ -625,19 +632,18 @@ pub fn begin_file_drag(app: &AppHandle, path: String) -> Result<(), String> {
         .ok_or_else(|| "shake shelf window is unavailable".to_string())?;
     window
         .run_on_main_thread(move || {
-            let _ = begin_file_drag_on_main_thread(&path);
+            let _ = begin_file_drag_on_main_thread(&paths);
         })
         .map_err(|error| error.to_string())
 }
 
-fn begin_file_drag_on_main_thread(path: &str) -> Result<(), String> {
+fn begin_file_drag_on_main_thread(paths: &[String]) -> Result<(), String> {
     let marker =
         MainThreadMarker::new().ok_or_else(|| "not on the macOS main thread".to_string())?;
     let panel = shelf_panel()?;
     let view = panel
         .contentView()
         .ok_or_else(|| "shake shelf panel has no content view".to_string())?;
-    let file_url = NSURL::fileURLWithPath_isDirectory(&NSString::from_str(path), false);
 
     // Use the live pointer location instead of the current event. The IPC round
     // trip from the webview means `NSApplication::currentEvent` is frequently nil
@@ -646,13 +652,18 @@ fn begin_file_drag_on_main_thread(path: &str) -> Result<(), String> {
     let pointer_view_position = view.convertPoint_fromView(pointer_window_position, None);
     let preview_rect = NSRect::new(pointer_view_position, NSSize::new(1.0, 1.0));
 
-    let dragging_item = NSDraggingItem::initWithPasteboardWriter(
-        NSDraggingItem::alloc(),
-        &ProtocolObject::from_retained(file_url),
-    );
-    unsafe { dragging_item.setDraggingFrame_contents(preview_rect, None) };
     let dragging_items = NSMutableArray::new();
-    dragging_items.addObject(&*dragging_item);
+    for path in paths {
+        let is_directory = Path::new(path).is_dir();
+        let file_url =
+            NSURL::fileURLWithPath_isDirectory(&NSString::from_str(path), is_directory);
+        let dragging_item = NSDraggingItem::initWithPasteboardWriter(
+            NSDraggingItem::alloc(),
+            &ProtocolObject::from_retained(file_url),
+        );
+        unsafe { dragging_item.setDraggingFrame_contents(preview_rect, None) };
+        dragging_items.addObject(&*dragging_item);
+    }
 
     // `beginDraggingSession` needs a mouse event, so synthesize a left-drag at
     // the pointer position. Reuse the real event timestamp when one is available.

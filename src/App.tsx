@@ -27,6 +27,7 @@ import {
   Settings2,
   Send,
   ShieldCheck,
+  SquareCheck,
   Trash2,
   X,
   type LucideIcon
@@ -147,6 +148,8 @@ function App() {
   const [items, setItems] = useState<ShelfItem[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [tooltip, setTooltip] = useState<TooltipState>(null);
+  const [shelfSelectionMode, setShelfSelectionMode] = useState(false);
+  const [shelfSelectedIds, setShelfSelectedIds] = useState<number[]>([]);
   const [status, setStatus] = useState("Ready");
   const [isBusy, setIsBusy] = useState(false);
   const [shakeStatus, setShakeStatus] = useState("starting");
@@ -817,10 +820,10 @@ function App() {
     });
   }
 
-  function beginNativeFileDrag(event: MouseEvent<HTMLElement>, path: string) {
-    if (event.button !== 0) return;
+  function beginNativeFileDrag(event: MouseEvent<HTMLElement>, paths: string[]) {
+    if (event.button !== 0 || paths.length === 0) return;
     event.preventDefault();
-    void invoke("begin_native_file_drag", { path }).catch((error) => {
+    void invoke("begin_native_file_drag", { paths }).catch((error) => {
       setStatus(toErrorMessage(error));
     });
   }
@@ -830,11 +833,32 @@ function App() {
     event.dataTransfer.setData("text/plain", content);
   }
 
-  function beginWindowsFileDrag(event: DragEvent<HTMLElement>, path: string) {
+  function beginWindowsFileDrag(event: DragEvent<HTMLElement>, paths: string[]) {
+    if (paths.length === 0) return;
     event.dataTransfer.effectAllowed = "copy";
-    const fileUrl = pathToFileUrl(path);
-    event.dataTransfer.setData("text/uri-list", fileUrl);
-    event.dataTransfer.setData("text/plain", fileUrl);
+    const fileUrls = paths.map(pathToFileUrl).join("\r\n");
+    event.dataTransfer.setData("text/uri-list", fileUrls);
+    event.dataTransfer.setData("text/plain", fileUrls);
+  }
+
+  function shelfDragPaths(item: ShelfItem) {
+    if (shelfSelectionMode && shelfSelectedIds.includes(item.id)) {
+      const selected = items.filter(
+        (candidate) =>
+          shelfSelectedIds.includes(candidate.id) &&
+          (candidate.kind === "file" || candidate.kind === "directory")
+      );
+      if (selected.length > 0) {
+        return selected.map((candidate) => candidate.path);
+      }
+    }
+    return [item.path];
+  }
+
+  function toggleShelfSelection(id: number) {
+    setShelfSelectedIds((ids) =>
+      ids.includes(id) ? ids.filter((itemId) => itemId !== id) : [...ids, id]
+    );
   }
 
   function handleDragOver(event: DragEvent<HTMLElement>) {
@@ -887,6 +911,18 @@ function App() {
             DropAir Shelf
           </span>
           <div className="shake-shelf-actions">
+            <button
+              className={`shake-shelf-icon${shelfSelectionMode ? " is-active" : ""}`}
+              type="button"
+              onClick={() => {
+                setShelfSelectionMode((enabled) => !enabled);
+                setShelfSelectedIds([]);
+              }}
+              data-tooltip={shelfSelectionMode ? "Finish selecting" : "Select items to drag out together"}
+              aria-label={shelfSelectionMode ? "Finish selecting" : "Select items"}
+            >
+              <SquareCheck size={14} />
+            </button>
             <button
               className="shake-shelf-icon"
               type="button"
@@ -944,32 +980,49 @@ function App() {
           <div className="shake-shelf-items">
             {items.map((item) => (
               <div
-                className={`shake-shelf-item${item.kind === "file" ? " is-file" : ""}${item.kind === "text" ? " is-text" : ""}`}
+                className={`shake-shelf-item${item.kind === "file" ? " is-file" : ""}${item.kind === "text" ? " is-text" : ""}${item.kind === "file" || item.kind === "directory" ? " is-draggable" : ""}${shelfSelectionMode && shelfSelectedIds.includes(item.id) ? " is-selected" : ""}`}
                 key={item.id}
                 data-tooltip={
                   item.kind === "text"
                     ? "Drag to copy this text, or use Send"
-                    : item.kind === "file"
-                      ? "Drag this file to another app, or use Send"
-                      : undefined
+                    : shelfSelectionMode
+                      ? "Drag to move selected items out"
+                      : item.kind === "directory"
+                        ? "Drag this folder to another app, or use Send"
+                        : "Drag this file to another app, or use Send"
                 }
                 draggable={
                   item.kind === "text" ||
-                  (isWindows && item.kind === "file" && !platformCapabilities?.nativeFileDragSupported)
+                  (isWindows &&
+                    (item.kind === "file" || item.kind === "directory") &&
+                    !platformCapabilities?.nativeFileDragSupported)
                 }
                 onDragStart={
                   item.kind === "text" && item.content
                     ? (event) => beginTextDrag(event, item.content as string)
-                    : isWindows && item.kind === "file"
-                      ? (event) => beginWindowsFileDrag(event, item.path)
+                    : isWindows && (item.kind === "file" || item.kind === "directory")
+                      ? (event) => beginWindowsFileDrag(event, shelfDragPaths(item))
                       : undefined
                 }
                 onMouseDown={
-                  item.kind === "file" && platformCapabilities?.nativeFileDragSupported
-                    ? (event) => beginNativeFileDrag(event, item.path)
+                  (item.kind === "file" || item.kind === "directory") &&
+                  platformCapabilities?.nativeFileDragSupported
+                    ? (event) => beginNativeFileDrag(event, shelfDragPaths(item))
                     : undefined
                 }
               >
+                {shelfSelectionMode && (item.kind === "file" || item.kind === "directory") && (
+                  <input
+                    type="checkbox"
+                    className="shake-shelf-select"
+                    checked={shelfSelectedIds.includes(item.id)}
+                    onChange={() => toggleShelfSelection(item.id)}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onDragStart={(event) => event.stopPropagation()}
+                    data-tooltip={`Select ${item.name}`}
+                    aria-label={`Select ${item.name}`}
+                  />
+                )}
                 <ShelfItemIcon item={item} size={16} className="shake-shelf-item-icon" />
                 <span className="shake-shelf-item-name">{item.name}</span>
                 <ShelfItemBadge item={item} />
@@ -1068,7 +1121,7 @@ function App() {
           </div>
         )}
         <div className="shake-shelf-statusbar" aria-live="polite">
-          <span>{items.length} queued</span>
+          <span>{shelfSelectionMode ? `${shelfSelectedIds.length} selected` : `${items.length} queued`}</span>
           <span>{status}</span>
         </div>
         <TooltipBubble tooltip={tooltip} />
