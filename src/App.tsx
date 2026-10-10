@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check as checkForAppUpdate, type Update } from "@tauri-apps/plugin-updater";
@@ -66,6 +66,27 @@ type TooltipState = {
   anchorX: number;
   placement: "above" | "below";
 } | null;
+
+type ThemePreference = "system" | "light" | "dark";
+
+const THEME_STORAGE_KEY = "dropair.theme";
+
+const THEME_OPTIONS: Array<{ value: ThemePreference; label: string; tooltip: string }> = [
+  { value: "system", label: "System", tooltip: "Match the operating system theme" },
+  { value: "light", label: "Light", tooltip: "Always use the light theme" },
+  { value: "dark", label: "Dark", tooltip: "Always use the dark theme" }
+];
+
+function resolveTheme(preference: ThemePreference) {
+  if (preference === "system") {
+    return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  return preference;
+}
+
+function applyTheme(preference: ThemePreference) {
+  document.documentElement.dataset.theme = resolveTheme(preference);
+}
 
 const TOOLTIP_SELECTOR = [
   "button",
@@ -167,6 +188,10 @@ function App() {
   const [items, setItems] = useState<ShelfItem[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [tooltip, setTooltip] = useState<TooltipState>(null);
+  const [themePreference, setThemePreference] = useState<ThemePreference>(() => {
+    const stored = localStorage.getItem(THEME_STORAGE_KEY);
+    return stored === "light" || stored === "dark" ? stored : "system";
+  });
   const [shelfSelectionMode, setShelfSelectionMode] = useState(false);
   const [shelfSelectedIds, setShelfSelectedIds] = useState<number[]>([]);
   const [appVersion, setAppVersion] = useState("");
@@ -282,6 +307,32 @@ function App() {
         return;
       }
       showTooltipFor(tooltipTargetAt(point[0], point[1]));
+    }).then((nextUnlisten) => {
+      if (cancelled) {
+        nextUnlisten();
+      } else {
+        unlisten = nextUnlisten;
+      }
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    applyTheme(themePreference);
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const handleChange = () => applyTheme(themePreference);
+    media.addEventListener("change", handleChange);
+    return () => media.removeEventListener("change", handleChange);
+  }, [themePreference]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    void listen<ThemePreference>("theme-changed", (event) => {
+      setThemePreference(event.payload);
     }).then((nextUnlisten) => {
       if (cancelled) {
         nextUnlisten();
@@ -809,6 +860,16 @@ function App() {
     }
   }
 
+  function updateTheme(preference: ThemePreference) {
+    setThemePreference(preference);
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, preference);
+    } catch {
+      // Ignore storage failures; the choice still applies for this session.
+    }
+    void emit("theme-changed", preference);
+  }
+
   async function checkForUpdates(manual: boolean) {
     if (isShelfWindow) return;
     if (manual) {
@@ -1237,7 +1298,7 @@ function App() {
           </div>
           <div>
             <strong>DropAir</strong>
-            <span>{appVersion || "0.2.3"}</span>
+            <span>{appVersion || "0.2.4"}</span>
           </div>
         </div>
 
@@ -1784,6 +1845,27 @@ function App() {
           </header>
 
           <div className="settings-list">
+            <div className="setting-row">
+              <div className="setting-copy">
+                <strong>Appearance</strong>
+                <span>Follow the system theme, or force a light or dark interface.</span>
+              </div>
+              <div className="theme-control" role="group" aria-label="Appearance">
+                {THEME_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`theme-option${themePreference === option.value ? " is-active" : ""}`}
+                    aria-pressed={themePreference === option.value}
+                    data-tooltip={option.tooltip}
+                    onClick={() => updateTheme(option.value)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {shakeSupported && (
               <>
                 <div className="setting-row">
@@ -1924,9 +2006,9 @@ function App() {
                 <strong>Updates</strong>
                 <span>
                   {updateVersion
-                    ? `Version ${updateVersion} is available. Installed version ${appVersion || "0.2.3"}.`
+                    ? `Version ${updateVersion} is available. Installed version ${appVersion || "0.2.4"}.`
                     : "DropAir checks for updates on launch. Installed version " +
-                      `${appVersion || "0.2.3"}.`}
+                      `${appVersion || "0.2.4"}.`}
                 </span>
               </div>
               <div className="download-location-control">
