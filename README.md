@@ -145,6 +145,22 @@ Limitations of this preview:
 
 Pairing, encryption, and WAN transport are the next milestones.
 
+## Disclaimer
+
+DropAir transfers are **not encrypted and not authenticated**. Files and text are
+sent in the clear over the local network, and any device that can reach the
+transfer port can connect. There is no pairing, no identity verification, and no
+end-to-end protection.
+
+- **Suitable for:** your own devices on a trusted home or office LAN, moving
+  non-sensitive files between them.
+- **Not suitable for:** public or untrusted Wi-Fi, shared or corporate networks,
+  the open internet or WAN, or any confidential, personal, or regulated data.
+
+The software is provided "as is", without warranty of any kind, express or
+implied. You use it entirely at your own risk. The author is not liable for any
+data loss, data leakage, corruption, or other damage arising from using DropAir.
+
 ### Troubleshooting macOS to Windows transfers
 
 If sending from macOS fails with `Connection refused`, the Windows machine is

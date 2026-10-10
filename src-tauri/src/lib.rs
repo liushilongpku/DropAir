@@ -567,6 +567,11 @@ fn show_main_window(app: &tauri::AppHandle) {
         let _ = window.unminimize();
         let _ = window.set_focus();
     }
+    // Jumping from the compact Shelf to the main window should dismiss the Shelf.
+    #[cfg(target_os = "macos")]
+    let _ = shake_shelf::hide(app);
+    #[cfg(target_os = "windows")]
+    let _ = windows_shelf::hide(app);
 }
 
 #[tauri::command]

@@ -656,6 +656,38 @@ kbd {
   color: #8a4b20;
 }
 
+.disclaimer-box {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid #e7cf9d;
+  border-radius: 8px;
+  color: #5a4a1f;
+  background: #fff9ec;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.disclaimer-box strong {
+  color: #7a5a12;
+}
+
+.disclaimer-box p {
+  margin: 8px 0 0;
+}
+
+.disclaimer-box p:first-of-type {
+  margin-top: 6px;
+}
+
+.disclaimer-box ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.disclaimer-box li {
+  margin-top: 4px;
+}
+
 .transfer-checks {
   display: grid;
   gap: 10px;

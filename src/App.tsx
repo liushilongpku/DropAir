@@ -1237,7 +1237,7 @@ function App() {
           </div>
           <div>
             <strong>DropAir</strong>
-            <span>{appVersion || "0.2.2"}</span>
+            <span>{appVersion || "0.2.3"}</span>
           </div>
         </div>
 
@@ -1720,6 +1720,29 @@ function App() {
               )}
             </div>
           )}
+          <div className="disclaimer-box" role="note">
+            <strong>Transfer disclaimer</strong>
+            <p>
+              DropAir transfers are <strong>not encrypted and not authenticated</strong>. Files and
+              text are sent in the clear over your local network, and any device that can reach the
+              port can connect. There is no pairing or identity check.
+            </p>
+            <ul>
+              <li>
+                <strong>Fine for:</strong> your own devices on a trusted home or office LAN, moving
+                non-sensitive files between them.
+              </li>
+              <li>
+                <strong>Not for:</strong> public or untrusted Wi-Fi, shared or corporate networks,
+                the open internet, or confidential, personal, or regulated data.
+              </li>
+            </ul>
+            <p>
+              The software is provided "as is", without warranty of any kind. You use it at your own
+              risk. The author is not responsible for any data loss, leakage, corruption, or other
+              damage caused by using DropAir.
+            </p>
+          </div>
         </section>
       ) : mainView === "sent" || mainView === "received" ? (
         <section className="workspace" aria-label={`${mainView} history`}>
@@ -1901,9 +1924,9 @@ function App() {
                 <strong>Updates</strong>
                 <span>
                   {updateVersion
-                    ? `Version ${updateVersion} is available. Installed version ${appVersion || "0.2.2"}.`
+                    ? `Version ${updateVersion} is available. Installed version ${appVersion || "0.2.3"}.`
                     : "DropAir checks for updates on launch. Installed version " +
-                      `${appVersion || "0.2.2"}.`}
+                      `${appVersion || "0.2.3"}.`}
                 </span>
               </div>
               <div className="download-location-control">
