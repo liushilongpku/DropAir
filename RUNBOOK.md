@@ -60,6 +60,23 @@ xattr -dr com.apple.quarantine /path/to/DropAir.app
 
 Then right-click the application and choose Open.
 
+## Release And Auto-Update
+
+1. Bump `"version"` in `src-tauri/tauri.conf.json` and keep `package.json` in sync.
+2. Commit and push `main`; confirm the smoke builds succeed.
+3. Push a matching tag, e.g. `git tag v0.2.0 && git push origin v0.2.0`.
+4. Wait for the `Release` workflow. It builds macOS (aarch64 + x86_64) and
+   Windows bundles, signs the updater artifacts with `TAURI_SIGNING_PRIVATE_KEY`,
+   uploads them to a draft release, then publishes it.
+5. Verify the release page lists the installers, `latest.json`, and the
+   `.app.tar.gz`/`.exe` updater bundles with their `.sig` files.
+
+Installed apps then update from **Settings -> Check for updates**. The update
+signing key lives at `~/.tauri/dropair.key` and is stored as the
+`TAURI_SIGNING_PRIVATE_KEY` GitHub Actions secret; losing it breaks future
+updates for existing installs.
+
+
 ## macOS Regression Checklist
 
 1. Drag a file and shake outside DropAir; verify that Shelf appears near the pointer.

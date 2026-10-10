@@ -635,6 +635,8 @@ pub fn run() {
             Some(vec![AUTOSTART_ARG]),
         ))
         .plugin(shortcut_plugin)
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let app_state = AppState::load(app.handle()).map_err(std::io::Error::other)?;
             app.manage(Mutex::new(app_state));

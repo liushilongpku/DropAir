@@ -26,6 +26,41 @@ xattr -dr com.apple.quarantine ~/Downloads/DropAir.app
 Adjust the path if you unzipped the app somewhere else, then right-click the app
 and choose **Open**.
 
+## In-App Updates
+
+DropAir uses the Tauri updater against GitHub Releases. Once a release with
+updater artifacts exists, the app checks for a newer version on launch and can
+install it from **Settings -> Check for updates** (or the "Install update"
+button when one is available). The update is downloaded and applied in place, so
+no manual download, re-signing, or replacement is needed for later versions.
+
+The very first install still has to be done manually from a release asset and
+may require removing the quarantine attribute as described above, because the
+build is ad-hoc signed and not notarized.
+
+### Publishing a new version
+
+1. Bump `"version"` in `src-tauri/tauri.conf.json` (and keep `package.json` in
+   sync), e.g. to `0.2.0`.
+2. Commit and push to `main`.
+3. Push a matching tag:
+
+   ```sh
+   git tag v0.2.0
+   git push origin v0.2.0
+   ```
+
+The **Release** workflow builds macOS (Apple Silicon + Intel) and Windows
+artifacts, signs the updater bundles with the `TAURI_SIGNING_PRIVATE_KEY`
+repository secret, uploads them to a draft GitHub Release, and then publishes
+it. The app's updater endpoint is
+`https://github.com/liushilongpku/DropAir/releases/latest/download/latest.json`.
+
+> Keep the update signing private key safe. It was generated at
+> `~/.tauri/dropair.key` and stored as the `TAURI_SIGNING_PRIVATE_KEY` Actions
+> secret. If it is lost, already-installed apps can no longer be updated.
+
+
 ## Local Development
 
 This workspace is WSL/Linux, so it cannot validate macOS AppKit behavior or

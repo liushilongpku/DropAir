@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Default capability for the main DropAir window.",
   "windows": ["main", "shake-shelf"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "updater:default", "process:allow-restart"]
 }

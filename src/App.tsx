@@ -1,9 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check as checkForAppUpdate, type Update } from "@tauri-apps/plugin-updater";
 import {
   CheckCircle2,
   ClipboardPaste,
+  Download,
   ExternalLink,
   File,
   FileArchive,
@@ -32,7 +36,7 @@ import {
   X,
   type LucideIcon
 } from "lucide-react";
-import { DragEvent, MouseEvent, useEffect, useMemo, useState } from "react";
+import { DragEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 
 const isShelfWindow = new URLSearchParams(window.location.search).has("shelf");
 
@@ -150,6 +154,10 @@ function App() {
   const [tooltip, setTooltip] = useState<TooltipState>(null);
   const [shelfSelectionMode, setShelfSelectionMode] = useState(false);
   const [shelfSelectedIds, setShelfSelectedIds] = useState<number[]>([]);
+  const [appVersion, setAppVersion] = useState("");
+  const [updateVersion, setUpdateVersion] = useState<string | null>(null);
+  const [updateProgress, setUpdateProgress] = useState("");
+  const pendingUpdateRef = useRef<Update | null>(null);
   const [status, setStatus] = useState("Ready");
   const [isBusy, setIsBusy] = useState(false);
   const [shakeStatus, setShakeStatus] = useState("starting");
@@ -341,6 +349,8 @@ function App() {
       }
     };
     void loadSettings();
+    void getVersion().then(setAppVersion).catch(() => undefined);
+    void checkForUpdates(false);
   }, []);
 
   useEffect(() => {
@@ -770,6 +780,62 @@ function App() {
     }
   }
 
+  async function checkForUpdates(manual: boolean) {
+    if (isShelfWindow) return;
+    if (manual) {
+      setIsBusy(true);
+      setStatus("Checking for updates…");
+    }
+    try {
+      const update = await checkForAppUpdate();
+      if (!update) {
+        pendingUpdateRef.current = null;
+        setUpdateVersion(null);
+        if (manual) setStatus("DropAir is up to date");
+        return;
+      }
+      pendingUpdateRef.current = update;
+      setUpdateVersion(update.version);
+      setStatus(`Update available: v${update.version}`);
+    } catch (error) {
+      if (manual) setStatus(toErrorMessage(error));
+    } finally {
+      if (manual) setIsBusy(false);
+    }
+  }
+
+  async function installUpdate() {
+    const update = pendingUpdateRef.current;
+    if (!update) return;
+    setIsBusy(true);
+    setUpdateProgress("Preparing download…");
+    try {
+      let downloaded = 0;
+      let total = 0;
+      await update.downloadAndInstall((event) => {
+        if (event.event === "Started") {
+          total = event.data.contentLength ?? 0;
+          setUpdateProgress("Downloading update…");
+        } else if (event.event === "Progress") {
+          downloaded += event.data.chunkLength;
+          setUpdateProgress(
+            total > 0
+              ? `Downloading update… ${Math.min(100, Math.round((downloaded / total) * 100))}%`
+              : "Downloading update…"
+          );
+        } else if (event.event === "Finished") {
+          setUpdateProgress("Installing update…");
+        }
+      });
+      setUpdateProgress("Restarting…");
+      await relaunch();
+    } catch (error) {
+      setUpdateProgress("");
+      setStatus(toErrorMessage(error));
+      setIsBusy(false);
+    }
+  }
+
   async function updateDeviceName() {
     setIsBusy(true);
     try {
@@ -1143,7 +1209,7 @@ function App() {
           </div>
           <div>
             <strong>DropAir</strong>
-            <span>0.1.0</span>
+            <span>{appVersion || "0.1.0"}</span>
           </div>
         </div>
 
@@ -1800,6 +1866,43 @@ function App() {
                 >
                   Use default
                 </button>
+              </div>
+            </div>
+
+            <div className="setting-row download-location-row">
+              <div className="setting-copy">
+                <strong>Updates</strong>
+                <span>
+                  {updateVersion
+                    ? `Version ${updateVersion} is available. Installed version ${appVersion || "0.1.0"}.`
+                    : "DropAir checks for updates on launch. Installed version " +
+                      `${appVersion || "0.1.0"}.`}
+                </span>
+              </div>
+              <div className="download-location-control">
+                {updateVersion ? (
+                  <button
+                    className="primary-button"
+                    type="button"
+                    disabled={isBusy}
+                    data-tooltip="Download the update and restart DropAir"
+                    onClick={() => void installUpdate()}
+                  >
+                    <Download size={16} />
+                    {updateProgress || "Install update"}
+                  </button>
+                ) : (
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    disabled={isBusy}
+                    data-tooltip="Check for a newer DropAir release"
+                    onClick={() => void checkForUpdates(true)}
+                  >
+                    {isBusy ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
+                    Check for updates
+                  </button>
+                )}
               </div>
             </div>
 

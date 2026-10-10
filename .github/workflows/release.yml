@@ -1,0 +1,73 @@
+name: Release
+
+# Publishing flow:
+#   1. Bump "version" in src-tauri/tauri.conf.json (keep package.json in sync).
+#   2. Commit and push, then push a matching tag, e.g. `git tag v0.2.0 && git push origin v0.2.0`.
+#   3. This workflow builds the updater artifacts, uploads them to a draft GitHub
+#      Release for the tag, then publishes it so the in-app updater can find it.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS Apple Silicon
+            platform: macos-latest
+            args: "--target aarch64-apple-darwin"
+          - label: macOS Intel
+            platform: macos-latest
+            args: "--target x86_64-apple-darwin"
+          - label: Windows
+            platform: windows-latest
+            args: "--bundles nsis,msi"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build and upload release artifacts
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "DropAir ${{ github.ref_name }}"
+          releaseBody: "Download an installer below, or update from inside DropAir via Settings -> Check for updates."
+          releaseDraft: true
+          prerelease: false
+          updaterJsonPreferNsis: true
+          args: ${{ matrix.args }}
+
+  publish:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${{ github.ref_name }}" --repo "${{ github.repository }}" --draft=false

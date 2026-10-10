@@ -28,6 +28,8 @@ jobs:
         run: npm ci
 
       - name: Build Windows installers
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
           npm run tauri -- build --bundles nsis,msi --verbose 2>&1 | Tee-Object -FilePath windows-build.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
