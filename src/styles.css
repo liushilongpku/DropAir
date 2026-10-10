@@ -249,12 +249,20 @@ kbd {
   cursor: grabbing;
 }
 
-.shake-shelf-item span {
+.shake-shelf-item-name {
   flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.shake-shelf-item-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  color: var(--type-color, #315d52);
 }
 
 .shake-shelf-remove {
@@ -276,7 +284,43 @@ kbd {
   background: #f5e5e2;
 }
 
+.shelf-item-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--type-color, #52645e);
+  background: var(--type-bg, #eef1ef);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1.5;
+  text-transform: uppercase;
+}
+
+.tone-folder { --type-color: #1f6faa; --type-bg: #eaf3f8; }
+.tone-document { --type-color: #1f6faa; --type-bg: #eaf3f8; }
+.tone-generic { --type-color: #64736e; --type-bg: #eef1ef; }
+.tone-image { --type-color: #2f7d4f; --type-bg: #e6f3ea; }
+.tone-video { --type-color: #6d4fa8; --type-bg: #efe9f8; }
+.tone-audio { --type-color: #b0477f; --type-bg: #f8e9f1; }
+.tone-archive { --type-color: #a5681f; --type-bg: #f7eede; }
+.tone-pdf { --type-color: #b23b30; --type-bg: #f8e6e4; }
+.tone-sheet { --type-color: #1f7a55; --type-bg: #e5f3ec; }
+.tone-slides { --type-color: #c05a1f; --type-bg: #f9ece2; }
+.tone-code { --type-color: #4a54b8; --type-bg: #e9eafb; }
+.tone-data { --type-color: #17787c; --type-bg: #e3f2f2; }
+.tone-font { --type-color: #6b5b7a; --type-bg: #efeaf3; }
+.tone-key { --type-color: #8a6b1f; --type-bg: #f6efdc; }
+.tone-app { --type-color: #52645e; --type-bg: #eef1ef; }
+
 @media (max-width: 220px) {
+  .shake-shelf-item .shelf-item-badge {
+    display: none;
+  }
+
   .shake-shelf-topline {
     padding: 0 8px;
   }
@@ -769,8 +813,8 @@ h1 {
   width: 44px;
   height: 44px;
   border-radius: 8px;
-  color: #1f6faa;
-  background: #eaf3f8;
+  color: var(--type-color, #1f6faa);
+  background: var(--type-bg, #eaf3f8);
 }
 
 .item-copy {
@@ -795,6 +839,25 @@ h1 {
   margin-top: 4px;
   color: #64736e;
   font-size: 12px;
+}
+
+.item-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.item-title strong {
+  min-width: 0;
+}
+
+.item-copy .shelf-item-badge {
+  display: inline-flex;
+  margin-top: 0;
+  color: var(--type-color, #52645e);
+  background: var(--type-bg, #eef1ef);
+  font-size: 10px;
 }
 
 .item-meta {

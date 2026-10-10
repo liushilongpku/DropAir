@@ -5,19 +5,31 @@ import {
   CheckCircle2,
   ClipboardPaste,
   ExternalLink,
+  File,
   FileArchive,
+  FileBraces,
+  FileCode,
+  FileCog,
+  FileImage,
+  FileKey,
+  FileMusic,
+  FileSpreadsheet,
   FileText,
+  FileType,
+  FileVideoCamera,
   Folder,
   FolderOpen,
   Laptop,
   Loader2,
   PanelTopOpen,
+  Presentation,
   RefreshCw,
   Settings2,
   Send,
   ShieldCheck,
   Trash2,
-  X
+  X,
+  type LucideIcon
 } from "lucide-react";
 import { DragEvent, MouseEvent, useEffect, useMemo, useState } from "react";
 
@@ -870,8 +882,9 @@ function App() {
                     : undefined
                 }
               >
-                {item.kind === "directory" ? <Folder size={16} /> : <FileText size={16} />}
-                <span>{item.name}</span>
+                <ShelfItemIcon item={item} size={16} className="shake-shelf-item-icon" />
+                <span className="shake-shelf-item-name">{item.name}</span>
+                <ShelfItemBadge item={item} />
                 {item.kind !== "text" && (
                   <>
                     <button
@@ -1162,11 +1175,12 @@ function App() {
                       aria-label={`Select ${item.name}`}
                     />
                   )}
-                  <div className="item-icon" aria-hidden="true">
-                    {item.kind === "directory" ? <Folder size={20} /> : <FileText size={20} />}
-                  </div>
+                  <ShelfItemIcon item={item} size={20} className="item-icon" />
                   <div className="item-copy">
-                    <strong>{item.name}</strong>
+                    <div className="item-title">
+                      <strong>{item.name}</strong>
+                      <ShelfItemBadge item={item} />
+                    </div>
                     <span>{item.content ?? item.path}</span>
                   </div>
                   <div className="item-meta">
@@ -1652,6 +1666,151 @@ function App() {
       )}
     </main>
   );
+}
+
+type FileTypePresentation = {
+  Icon: LucideIcon;
+  tone: string;
+  badge: string | null;
+};
+
+const FILE_TYPE_GROUPS: Array<{
+  tone: string;
+  Icon: LucideIcon;
+  extensions: readonly string[];
+}> = [
+  {
+    tone: "image",
+    Icon: FileImage,
+    extensions: [
+      "png", "jpg", "jpeg", "jfif", "gif", "webp", "bmp", "svg", "tif", "tiff",
+      "heic", "heif", "avif", "ico", "raw", "cr2", "nef", "psd", "ai"
+    ]
+  },
+  {
+    tone: "video",
+    Icon: FileVideoCamera,
+    extensions: ["mp4", "mov", "mkv", "avi", "webm", "flv", "wmv", "m4v", "mpg", "mpeg", "3gp"]
+  },
+  {
+    tone: "audio",
+    Icon: FileMusic,
+    extensions: ["mp3", "wav", "flac", "aac", "ogg", "m4a", "opus", "wma", "aiff", "mid", "midi"]
+  },
+  {
+    tone: "archive",
+    Icon: FileArchive,
+    extensions: ["zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz", "zst", "lz", "lzma", "cab", "iso"]
+  },
+  {
+    tone: "pdf",
+    Icon: FileText,
+    extensions: ["pdf"]
+  },
+  {
+    tone: "document",
+    Icon: FileText,
+    extensions: ["doc", "docx", "odt", "rtf", "txt", "md", "markdown", "pages", "tex", "epub"]
+  },
+  {
+    tone: "sheet",
+    Icon: FileSpreadsheet,
+    extensions: ["xls", "xlsx", "csv", "tsv", "ods", "numbers"]
+  },
+  {
+    tone: "slides",
+    Icon: Presentation,
+    extensions: ["ppt", "pptx", "key", "odp"]
+  },
+  {
+    tone: "code",
+    Icon: FileCode,
+    extensions: [
+      "js", "jsx", "mjs", "cjs", "ts", "tsx", "html", "htm", "css", "scss", "sass", "less",
+      "vue", "svelte", "rs", "py", "rb", "php", "go", "java", "kt", "kts", "swift", "c", "cc",
+      "cpp", "cxx", "h", "hpp", "cs", "sh", "bash", "zsh", "fish", "ps1", "bat", "cmd", "sql",
+      "lua", "pl", "r", "dart", "scala", "clj", "ex", "exs", "erl", "hs"
+    ]
+  },
+  {
+    tone: "data",
+    Icon: FileBraces,
+    extensions: ["json", "jsonc", "json5", "yaml", "yml", "toml", "xml", "ini", "cfg", "conf", "env", "properties"]
+  },
+  {
+    tone: "font",
+    Icon: FileType,
+    extensions: ["ttf", "otf", "woff", "woff2", "eot"]
+  },
+  {
+    tone: "key",
+    Icon: FileKey,
+    extensions: ["pem", "key", "crt", "cer", "p12", "pfx", "gpg", "asc"]
+  },
+  {
+    tone: "app",
+    Icon: FileCog,
+    extensions: ["exe", "msi", "dmg", "pkg", "deb", "rpm", "appimage", "apk", "bin", "run", "app"]
+  }
+];
+
+const FILE_TYPE_BY_EXTENSION = new Map<string, { tone: string; Icon: LucideIcon }>();
+for (const group of FILE_TYPE_GROUPS) {
+  for (const extension of group.extensions) {
+    FILE_TYPE_BY_EXTENSION.set(extension, { tone: group.tone, Icon: group.Icon });
+  }
+}
+
+function fileExtension(name: string) {
+  const trimmed = name.trim();
+  const dotIndex = trimmed.lastIndexOf(".");
+  if (dotIndex <= 0 || dotIndex === trimmed.length - 1) {
+    return "";
+  }
+  return trimmed.slice(dotIndex + 1).toLowerCase();
+}
+
+function describeShelfItem(item: ShelfItem): FileTypePresentation {
+  if (item.kind === "directory") {
+    return { Icon: Folder, tone: "folder", badge: null };
+  }
+
+  if (item.kind === "text") {
+    return { Icon: FileText, tone: "document", badge: "TEXT" };
+  }
+
+  const extension = fileExtension(item.name);
+  const badge = extension ? extension.slice(0, 4).toUpperCase() : null;
+  const match = FILE_TYPE_BY_EXTENSION.get(extension);
+
+  if (match) {
+    return { Icon: match.Icon, tone: match.tone, badge };
+  }
+
+  return { Icon: File, tone: "generic", badge };
+}
+
+function ShelfItemIcon({
+  item,
+  size,
+  className
+}: {
+  item: ShelfItem;
+  size: number;
+  className: string;
+}) {
+  const { Icon, tone } = describeShelfItem(item);
+  return (
+    <span className={`${className} tone-${tone}`} aria-hidden="true">
+      <Icon size={size} />
+    </span>
+  );
+}
+
+function ShelfItemBadge({ item }: { item: ShelfItem }) {
+  const { tone, badge } = describeShelfItem(item);
+  if (!badge) return null;
+  return <span className={`shelf-item-badge tone-${tone}`}>{badge}</span>;
 }
 
 function formatSize(size: number | null) {
