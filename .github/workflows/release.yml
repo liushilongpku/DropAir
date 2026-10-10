@@ -60,6 +60,7 @@ jobs:
           releaseDraft: true
           prerelease: false
           updaterJsonPreferNsis: true
+          retryAttempts: 2
           args: ${{ matrix.args }}
 
   publish:
