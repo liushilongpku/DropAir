@@ -1331,7 +1331,7 @@ function App() {
           </div>
           <div>
             <strong>DropAir</strong>
-            <span>{appVersion || "0.2.4"}</span>
+            <span>{appVersion || "0.2.5"}</span>
           </div>
         </div>
 
@@ -1819,7 +1819,8 @@ function App() {
             <p>
               DropAir transfers are <strong>not encrypted and not authenticated</strong>. Files and
               text are sent in the clear over your local network, and any device that can reach the
-              port can connect. There is no pairing or identity check.
+              port can connect. There is no pairing or identity check. Clipboard sync uses the same
+              channel, so while a sync mode is active anything you copy can be sent to linked devices.
             </p>
             <ul>
               <li>
@@ -2080,9 +2081,9 @@ function App() {
                 <strong>Updates</strong>
                 <span>
                   {updateVersion
-                    ? `Version ${updateVersion} is available. Installed version ${appVersion || "0.2.4"}.`
+                    ? `Version ${updateVersion} is available. Installed version ${appVersion || "0.2.5"}.`
                     : "DropAir checks for updates on launch. Installed version " +
-                      `${appVersion || "0.2.4"}.`}
+                      `${appVersion || "0.2.5"}.`}
                 </span>
               </div>
               <div className="download-location-control">

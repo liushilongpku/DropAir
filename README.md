@@ -145,6 +145,28 @@ Limitations of this preview:
 
 Pairing, encryption, and WAN transport are the next milestones.
 
+## Clipboard Sync
+
+DropAir can mirror the system clipboard between linked devices over the same
+LAN channel. Choose a mode in **Settings -> Clipboard sync**:
+
+- **Off** - the clipboard is never shared.
+- **Manual** - send on demand with **Send now**; incoming clipboard content is
+  applied to this machine.
+- **Send** - copying is sent automatically to linked devices; incoming
+  clipboard content is ignored.
+- **Two-way** - copying is sent automatically and incoming clipboard content is
+  applied to this machine.
+
+Both text and images are synchronized (images are capped at 24 MB). A
+**Send now** button is always available. The current clipboard is not sent when
+the app starts; only later changes are.
+
+> Clipboard content is sent over the same **unencrypted, unauthenticated**
+> channel as file transfers. Passwords, one-time codes, and anything else you
+> copy can leave the machine while a sync mode is active. Leave it **Off** unless
+> you are on a trusted network.
+
 ## Disclaimer
 
 DropAir transfers are **not encrypted and not authenticated**. Files and text are
