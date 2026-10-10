@@ -29,6 +29,25 @@ button {
   font: inherit;
 }
 
+button,
+a[href],
+select,
+label,
+summary,
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"],
+[role="button"],
+[role="switch"] {
+  cursor: pointer;
+}
+
+button:disabled,
+input:disabled,
+select:disabled {
+  cursor: not-allowed;
+}
+
 kbd {
   display: inline-flex;
   align-items: center;
