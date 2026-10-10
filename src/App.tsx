@@ -77,6 +77,20 @@ const TOOLTIP_SELECTOR = [
   "[data-tooltip]"
 ].join(", ");
 
+function readTooltipText(element: Element) {
+  const explicit = element.getAttribute("data-tooltip");
+  if (explicit) return explicit;
+  return element.getAttribute("aria-label");
+}
+
+function tooltipTargetAt(x: number, y: number) {
+  const element = document.elementFromPoint(x, y);
+  if (!element) return null;
+  const target = element.closest(TOOLTIP_SELECTOR);
+  if (!target || !readTooltipText(target)) return null;
+  return target;
+}
+
 type ShakeDiagnostics = {
   mouseDowns: number;
   motionSamples: number;
@@ -204,45 +218,31 @@ function App() {
     void refreshShelf();
   }, []);
 
+  function showTooltipFor(element: Element | null) {
+    const target = element ? element.closest(TOOLTIP_SELECTOR) : null;
+    const text = target ? readTooltipText(target) : null;
+    if (!target || !text) {
+      setTooltip(null);
+      return;
+    }
+    const rect = target.getBoundingClientRect();
+    const placement = rect.bottom + 48 > window.innerHeight ? "above" : "below";
+    const maxWidth = Math.min(280, window.innerWidth - 16);
+    const estimatedWidth = Math.min(maxWidth, text.length * 6.5 + 20);
+    const halfWidth = estimatedWidth / 2 + 8;
+    const centerX = rect.left + rect.width / 2;
+    setTooltip({
+      text,
+      x: Math.min(Math.max(centerX, halfWidth), window.innerWidth - halfWidth),
+      y: placement === "below" ? rect.bottom + 8 : rect.top - 8,
+      placement
+    });
+  }
+
   useEffect(() => {
-    const readTooltip = (element: Element) => {
-      const explicit = element.getAttribute("data-tooltip");
-      if (explicit) return explicit;
-      const label = element.getAttribute("aria-label");
-      if (label) return label;
-      return null;
+    const handleMouseOver = (event: globalThis.MouseEvent) => {
+      if (event.target instanceof Element) showTooltipFor(event.target);
     };
-
-    const showTooltipFor = (target: EventTarget | null) => {
-      if (!(target instanceof Element)) {
-        setTooltip(null);
-        return;
-      }
-      const element = target.closest(TOOLTIP_SELECTOR);
-      if (!element) {
-        setTooltip(null);
-        return;
-      }
-      const text = readTooltip(element);
-      if (!text) {
-        setTooltip(null);
-        return;
-      }
-      const rect = element.getBoundingClientRect();
-      const placement = rect.bottom + 48 > window.innerHeight ? "above" : "below";
-      const maxWidth = Math.min(280, window.innerWidth - 16);
-      const estimatedWidth = Math.min(maxWidth, text.length * 6.5 + 20);
-      const halfWidth = estimatedWidth / 2 + 8;
-      const centerX = rect.left + rect.width / 2;
-      setTooltip({
-        text,
-        x: Math.min(Math.max(centerX, halfWidth), window.innerWidth - halfWidth),
-        y: placement === "below" ? rect.bottom + 8 : rect.top - 8,
-        placement
-      });
-    };
-
-    const handleMouseOver = (event: globalThis.MouseEvent) => showTooltipFor(event.target);
     const handleMouseOut = (event: globalThis.MouseEvent) => {
       const target = event.target;
       if (!(target instanceof Element)) return;
@@ -263,6 +263,33 @@ function App() {
       document.removeEventListener("pointerdown", hideTooltip, true);
       window.removeEventListener("scroll", hideTooltip, true);
       window.removeEventListener("blur", hideTooltip);
+    };
+  }, []);
+
+  // The floating Shelf is a non-activating panel, so it does not receive hover
+  // events until it becomes key. Rust reports the pointer position inside the
+  // panel instead, and we resolve the element under it here.
+  useEffect(() => {
+    if (!isShelfWindow) return;
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    void listen<[number, number] | null>("shelf-pointer", (event) => {
+      const point = event.payload;
+      if (!point) {
+        setTooltip(null);
+        return;
+      }
+      showTooltipFor(tooltipTargetAt(point[0], point[1]));
+    }).then((nextUnlisten) => {
+      if (cancelled) {
+        nextUnlisten();
+      } else {
+        unlisten = nextUnlisten;
+      }
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
     };
   }, []);
 

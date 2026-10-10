@@ -199,6 +199,9 @@ pub fn setup(app: &AppHandle, settings: &AppSettings) -> tauri::Result<()> {
 
     let shelf_app = app.clone();
     thread::spawn(move || keep_shelf_front(shelf_app));
+
+    let pointer_app = app.clone();
+    thread::spawn(move || watch_shelf_pointer(pointer_app));
     Ok(())
 }
 
@@ -361,6 +364,42 @@ fn current_pointer_position() -> Option<(f64, f64)> {
     let event = CGEvent::new(source).ok()?;
     let point = event.location();
     Some((point.x, point.y))
+}
+
+/// The visible Shelf is a non-activating panel, so WKWebView does not receive
+/// hover events until the panel becomes key. Report the pointer position inside
+/// the panel instead, and let the frontend resolve the element under it.
+fn watch_shelf_pointer(app: AppHandle) {
+    let mut was_visible = false;
+    loop {
+        thread::sleep(Duration::from_millis(60));
+        if !SHELF_VISIBLE.load(Ordering::Acquire) {
+            if was_visible {
+                was_visible = false;
+                let _ = app.emit("shelf-pointer", Option::<[f64; 2]>::None);
+            }
+            continue;
+        }
+        was_visible = true;
+        let pointer_app = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            let _ = pointer_app.emit("shelf-pointer", shelf_pointer_position());
+        });
+    }
+}
+
+/// Pointer location relative to the panel content, in points with a top-left
+/// origin so it matches CSS coordinates. Returns `None` when outside the panel.
+fn shelf_pointer_position() -> Option<[f64; 2]> {
+    let panel = shelf_panel().ok()?;
+    let frame = panel.frame();
+    let pointer = NSEvent::mouseLocation();
+    let x = pointer.x - frame.origin.x;
+    let y = frame.size.height - (pointer.y - frame.origin.y);
+    if x < 0.0 || y < 0.0 || x > frame.size.width || y > frame.size.height {
+        return None;
+    }
+    Some([x, y])
 }
 
 fn handle_event(
