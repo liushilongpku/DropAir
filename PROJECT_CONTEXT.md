@@ -19,6 +19,7 @@ The development host is Linux/WSL and cannot execute or visually validate AppKit
 - `src-tauri/src/transfer.rs`: UDP device discovery, active LAN scan, manual peer entries, TCP file/text transfer, transfer error state, and the Devices-page self-check command.
 - `.github/workflows/macos-smoke-build.yml`: macOS build, ad-hoc signing, ZIP packaging, and artifact upload.
 - `.github/workflows/windows-smoke-build.yml`: Windows NSIS/MSI build and artifact upload.
+- `.github/workflows/release.yml`: tag-triggered release build for macOS (aarch64 + x86_64) and Windows that signs updater artifacts, uploads them to a draft GitHub Release, and publishes it.
 
 ## Stable Behavior
 
@@ -48,7 +49,8 @@ The development host is Linux/WSL and cannot execute or visually validate AppKit
 - Local frontend validation: `npm run build`.
 - Local Rust validation uses an installed macOS target and `cargo check --tests --target x86_64-apple-darwin`; this checks compilation but does not run AppKit behavior.
 - Pushes to `main` start both `macOS Smoke Build` and `Windows Smoke Build`; the former uploads `DropAir.app.zip`, and the latter uploads NSIS and MSI installers.
-- Bundles are ad-hoc signed, not notarized. Downloaded builds may require removing `com.apple.quarantine`, as documented in `README.md`.
+- Version tags (`v*`) trigger the `Release` workflow, which enables the Tauri updater. Installed apps check `https://github.com/liushilongpku/DropAir/releases/latest/download/latest.json`, download the signed update bundle, and apply it in place (Settings -> Check for updates). The update signing private key is the `TAURI_SIGNING_PRIVATE_KEY` Actions secret; losing it breaks updates for existing installs.
+- Bundles are ad-hoc signed, not notarized. Downloaded builds may require removing `com.apple.quarantine`, as documented in `README.md`. In-app updates avoid the quarantine step because the app downloads them directly.
 - Windows installers are produced as NSIS and MSI artifacts by `.github/workflows/windows-smoke-build.yml`.
 - Windows file drag-out uses WebView `text/uri-list`/`text/plain` payloads rather than the macOS native drag API; Explorer or other target applications may not accept them.
 - `src-tauri/Cargo.lock` and generated Tauri files are intentionally not tracked in the current repository setup.
