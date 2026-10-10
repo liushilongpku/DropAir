@@ -17,6 +17,7 @@ pub struct AppSettings {
     pub device_id: String,
     pub device_name: String,
     pub download_directory: Option<String>,
+    pub clipboard_mode: String,
 }
 
 impl Default for AppSettings {
@@ -28,6 +29,7 @@ impl Default for AppSettings {
             device_id: String::new(),
             device_name: String::new(),
             download_directory: None,
+            clipboard_mode: "off".to_string(),
         }
     }
 }
@@ -148,6 +150,16 @@ impl SettingsStore {
         Ok(self.settings())
     }
 
+    pub fn set_clipboard_mode(&mut self, mode: String) -> Result<AppSettings, String> {
+        let previous = self.settings.clipboard_mode.clone();
+        self.settings.clipboard_mode = normalize_clipboard_mode(&mode).to_string();
+        if let Err(error) = self.save() {
+            self.settings.clipboard_mode = previous;
+            return Err(error);
+        }
+        Ok(self.settings())
+    }
+
     fn save(&self) -> Result<(), String> {
         let parent = self
             .path
@@ -164,6 +176,15 @@ impl SettingsStore {
 
 pub fn clamp_sensitivity(sensitivity: u8) -> u8 {
     sensitivity.clamp(MIN_SENSITIVITY, MAX_SENSITIVITY)
+}
+
+pub fn normalize_clipboard_mode(mode: &str) -> &'static str {
+    match mode {
+        "manual" => "manual",
+        "push" => "push",
+        "sync" => "sync",
+        _ => "off",
+    }
 }
 
 fn generate_device_id() -> String {

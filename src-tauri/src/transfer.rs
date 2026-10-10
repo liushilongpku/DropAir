@@ -1,3 +1,4 @@
+use crate::clipboard_sync::{ClipboardPayload, MAX_CLIPBOARD_IMAGE_BYTES};
 use crate::settings::SettingsStore;
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -58,11 +59,25 @@ static DISCOVERY_BROADCAST_UP: AtomicBool = AtomicBool::new(false);
 static TCP_LISTENER_UP: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(default, rename_all = "camelCase")]
 struct TransferHeader {
     kind: String,
     name: String,
     size: u64,
+    width: Option<u32>,
+    height: Option<u32>,
+}
+
+impl Default for TransferHeader {
+    fn default() -> Self {
+        Self {
+            kind: String::new(),
+            name: String::new(),
+            size: 0,
+            width: None,
+            height: None,
+        }
+    }
 }
 
 pub fn setup(app: &AppHandle) -> Result<(), String> {
@@ -392,57 +407,96 @@ fn handle_incoming_transfer(app: &AppHandle, stream: TcpStream) -> Result<(), St
         let header: TransferHeader =
             serde_json::from_str(header_line.trim()).map_err(|error| error.to_string())?;
         let kind = header.kind.as_str();
-        let max_size = if kind == "text" {
-            MAX_TRANSFER_TEXT_SIZE
-        } else if kind == "file" {
-            MAX_TRANSFER_ITEM_SIZE
-        } else {
-            return Err(format!("unsupported transfer item kind: {}", header.kind));
+        let max_size = match kind {
+            "text" | "clipboard-text" => MAX_TRANSFER_TEXT_SIZE,
+            "file" => MAX_TRANSFER_ITEM_SIZE,
+            "clipboard-image" => MAX_CLIPBOARD_IMAGE_BYTES,
+            _ => return Err(format!("unsupported transfer item kind: {}", header.kind)),
         };
         if header.size > max_size {
             return Err(format!("transfer item is too large: {} bytes", header.size));
         }
 
-        if kind == "text" {
-            let mut content = vec![0u8; header.size as usize];
-            reader
-                .read_exact(&mut content)
-                .map_err(|error| format!("could not read text payload: {error}"))?;
-            let content = String::from_utf8(content)
-                .map_err(|_| "received text is not valid UTF-8".to_string())?;
-            crate::add_shelf_text_to_app(app, content)?;
-        } else {
-            let file_name = sanitize_file_name(&header.name);
-            let received_dir = received_directory(app)?;
-            let target_path = received_dir.join(format!("{}_{}", now_millis(), file_name));
-            let temporary_path = target_path.with_extension("dropair-partial");
-            let mut file = std::fs::File::create(&temporary_path).map_err(|error| error.to_string())?;
-            let mut remaining = header.size;
-            let mut buffer = vec![0u8; 64 * 1024];
-            while remaining > 0 {
-                let chunk_size = remaining.min(buffer.len() as u64) as usize;
-                let read = reader
-                    .read(&mut buffer[..chunk_size])
-                    .map_err(|error| error.to_string())?;
-                if read == 0 {
-                    let _ = std::fs::remove_file(&temporary_path);
-                    return Err("connection closed before payload finished".to_string());
-                }
-                file.write_all(&buffer[..read]).map_err(|error| error.to_string())?;
-                remaining -= read as u64;
+        match kind {
+            "text" => {
+                let mut content = vec![0u8; header.size as usize];
+                reader
+                    .read_exact(&mut content)
+                    .map_err(|error| format!("could not read text payload: {error}"))?;
+                let content = String::from_utf8(content)
+                    .map_err(|_| "received text is not valid UTF-8".to_string())?;
+                crate::add_shelf_text_to_app(app, content)?;
             }
-            file.sync_all().map_err(|error| error.to_string())?;
-            std::fs::rename(&temporary_path, &target_path).map_err(|error| error.to_string())?;
-            let target = target_path.to_string_lossy().to_string();
-            crate::add_shelf_paths(vec![target], app.clone())?;
+            "clipboard-text" => {
+                let mut content = vec![0u8; header.size as usize];
+                reader
+                    .read_exact(&mut content)
+                    .map_err(|error| format!("could not read clipboard text: {error}"))?;
+                let content = String::from_utf8(content)
+                    .map_err(|_| "received clipboard text is not valid UTF-8".to_string())?;
+                crate::clipboard_sync::accept_incoming(app, &ClipboardPayload::Text(content))?;
+            }
+            "clipboard-image" => {
+                let width = header.width.unwrap_or(0);
+                let height = header.height.unwrap_or(0);
+                let expected = u64::from(width)
+                    .saturating_mul(u64::from(height))
+                    .saturating_mul(4);
+                if width == 0 || height == 0 || expected != header.size {
+                    return Err("received clipboard image has an invalid size".to_string());
+                }
+                let mut rgba = vec![0u8; header.size as usize];
+                reader
+                    .read_exact(&mut rgba)
+                    .map_err(|error| format!("could not read clipboard image: {error}"))?;
+                crate::clipboard_sync::accept_incoming(
+                    app,
+                    &ClipboardPayload::Image {
+                        width,
+                        height,
+                        rgba,
+                    },
+                )?;
+            }
+            _ => {
+                let file_name = sanitize_file_name(&header.name);
+                let received_dir = received_directory(app)?;
+                let target_path = received_dir.join(format!("{}_{}", now_millis(), file_name));
+                let temporary_path = target_path.with_extension("dropair-partial");
+                let mut file =
+                    std::fs::File::create(&temporary_path).map_err(|error| error.to_string())?;
+                let mut remaining = header.size;
+                let mut buffer = vec![0u8; 64 * 1024];
+                while remaining > 0 {
+                    let chunk_size = remaining.min(buffer.len() as u64) as usize;
+                    let read = reader
+                        .read(&mut buffer[..chunk_size])
+                        .map_err(|error| error.to_string())?;
+                    if read == 0 {
+                        let _ = std::fs::remove_file(&temporary_path);
+                        return Err("connection closed before payload finished".to_string());
+                    }
+                    file.write_all(&buffer[..read]).map_err(|error| error.to_string())?;
+                    remaining -= read as u64;
+                }
+                file.sync_all().map_err(|error| error.to_string())?;
+                std::fs::rename(&temporary_path, &target_path).map_err(|error| error.to_string())?;
+                let target = target_path.to_string_lossy().to_string();
+                crate::add_shelf_paths(vec![target], app.clone())?;
+            }
         }
         received_items += 1;
+        let message = if kind.starts_with("clipboard") {
+            format!("Clipboard received from {peer_name}")
+        } else {
+            format!("Received {} from {}", header.name, peer_name)
+        };
         let _ = app.emit(
             "transfer-status",
             serde_json::json!({
                 "peerId": peer_name,
                 "state": "received",
-                "message": format!("Received {} from {}", header.name, peer_name)
+                "message": message
             }),
         );
     }
@@ -591,6 +645,108 @@ pub fn send_shelf_items(
     Ok(())
 }
 
+pub fn has_linked_peers(app: &AppHandle) -> bool {
+    app.state::<Mutex<PeersState>>()
+        .lock()
+        .map(|state| state.peers.iter().any(|peer| peer.linked))
+        .unwrap_or(false)
+}
+
+pub fn send_clipboard_payload(app: &AppHandle, payload: &ClipboardPayload) -> Result<usize, String> {
+    let peer_addresses: Vec<Vec<String>> = {
+        let state = app.state::<Mutex<PeersState>>();
+        let state = state.lock().map_err(|_| "failed to lock peers".to_string())?;
+        state
+            .peers
+            .iter()
+            .filter(|peer| peer.linked)
+            .map(peer_endpoints)
+            .collect()
+    };
+    if peer_addresses.is_empty() {
+        return Err("no linked device is available".to_string());
+    }
+
+    let mut sent = 0usize;
+    let mut last_error = None;
+    for addresses in peer_addresses {
+        let mut delivered = false;
+        for address in &addresses {
+            match send_clipboard_to_peer(app, address, payload) {
+                Ok(()) => {
+                    delivered = true;
+                    break;
+                }
+                Err(error) => last_error = Some(error),
+            }
+        }
+        if delivered {
+            sent += 1;
+        }
+    }
+    if sent == 0 {
+        return Err(last_error.unwrap_or_else(|| "could not reach any linked device".to_string()));
+    }
+    Ok(sent)
+}
+
+fn send_clipboard_to_peer(
+    app: &AppHandle,
+    address: &str,
+    payload: &ClipboardPayload,
+) -> Result<(), String> {
+    let mut stream = TcpStream::connect(address).map_err(|error| {
+        format!("Could not connect to {address}: {error}. On Windows, allow DropAir through the firewall for private networks.")
+    })?;
+    stream
+        .set_read_timeout(Some(SOCKET_TIMEOUT))
+        .map_err(|error| error.to_string())?;
+    stream
+        .set_write_timeout(Some(SOCKET_TIMEOUT))
+        .map_err(|error| error.to_string())?;
+    let mut reader = BufReader::new(stream.try_clone().map_err(|error| error.to_string())?);
+    let (id, name) = device_identity(app);
+    writeln!(stream, "{TRANSFER_PREFIX}{id}|{name}").map_err(|error| error.to_string())?;
+
+    let (kind, size, width, height, bytes): (&str, u64, Option<u32>, Option<u32>, &[u8]) = match payload
+    {
+        ClipboardPayload::Text(content) => (
+            "clipboard-text",
+            content.len() as u64,
+            None,
+            None,
+            content.as_bytes(),
+        ),
+        ClipboardPayload::Image {
+            width,
+            height,
+            rgba,
+        } => (
+            "clipboard-image",
+            rgba.len() as u64,
+            Some(*width),
+            Some(*height),
+            rgba.as_slice(),
+        ),
+    };
+    let header = TransferHeader {
+        kind: kind.to_string(),
+        name: "clipboard".to_string(),
+        size,
+        width,
+        height,
+    };
+    let header_json = serde_json::to_string(&header).map_err(|error| error.to_string())?;
+    writeln!(stream, "{header_json}").map_err(|error| error.to_string())?;
+    stream.write_all(bytes).map_err(|error| error.to_string())?;
+
+    stream
+        .shutdown(Shutdown::Write)
+        .map_err(|error| format!("could not finish transfer: {error}"))?;
+    wait_for_transfer_completion(&mut reader, 1)?;
+    Ok(())
+}
+
 fn send_items_to_peer(app: &AppHandle, address: &str, item_ids: &[u64]) -> Result<usize, String> {
     let mut stream = TcpStream::connect(address).map_err(|error| {
         format!(
@@ -627,6 +783,8 @@ fn send_items_to_peer(app: &AppHandle, address: &str, item_ids: &[u64]) -> Resul
                     kind: "text".to_string(),
                     name: format!("{}.txt", item.name),
                     size: content.len() as u64,
+                    width: None,
+                    height: None,
                 };
                 let header_json = serde_json::to_string(&header).map_err(|error| error.to_string())?;
                 writeln!(stream, "{header_json}").map_err(|error| error.to_string())?;
@@ -644,6 +802,8 @@ fn send_items_to_peer(app: &AppHandle, address: &str, item_ids: &[u64]) -> Resul
                     kind: "file".to_string(),
                     name: item.name,
                     size,
+                    width: None,
+                    height: None,
                 };
                 let header_json = serde_json::to_string(&header).map_err(|error| error.to_string())?;
                 writeln!(stream, "{header_json}").map_err(|error| error.to_string())?;

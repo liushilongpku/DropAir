@@ -7,6 +7,7 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
+mod clipboard_sync;
 mod settings;
 mod transfer;
 
@@ -270,6 +271,25 @@ fn set_device_name(
         .lock()
         .map_err(|_| "failed to lock settings")?
         .set_device_name(name)
+}
+
+#[tauri::command]
+fn set_clipboard_mode(
+    mode: String,
+    state: tauri::State<'_, Mutex<SettingsStore>>,
+) -> Result<AppSettings, String> {
+    state
+        .lock()
+        .map_err(|_| "failed to lock settings")?
+        .set_clipboard_mode(mode)
+}
+
+#[tauri::command]
+fn send_clipboard(app: tauri::AppHandle) -> Result<(), String> {
+    std::thread::spawn(move || {
+        let _ = clipboard_sync::send_now(&app);
+    });
+    Ok(())
 }
 
 #[tauri::command]
@@ -642,6 +662,7 @@ pub fn run() {
         .plugin(shortcut_plugin)
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             let app_state = AppState::load(app.handle()).map_err(std::io::Error::other)?;
             app.manage(Mutex::new(app_state));
@@ -660,6 +681,8 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             windows_shelf::setup(app.handle(), &settings).map_err(std::io::Error::other)?;
             transfer::setup(app.handle()).map_err(std::io::Error::other)?;
+            let clipboard_app = app.handle().clone();
+            std::thread::spawn(move || clipboard_sync::watch(clipboard_app));
             setup_tray(app.handle())?;
             Ok(())
         })
@@ -681,6 +704,8 @@ pub fn run() {
             app_settings,
             set_download_directory,
             set_device_name,
+            set_clipboard_mode,
+            send_clipboard,
             set_shake_enabled,
             set_shake_sensitivity,
             accessibility_permission_status,

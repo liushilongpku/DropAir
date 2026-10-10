@@ -77,6 +77,13 @@ const THEME_OPTIONS: Array<{ value: ThemePreference; label: string; tooltip: str
   { value: "dark", label: "Dark", tooltip: "Always use the dark theme" }
 ];
 
+const CLIPBOARD_OPTIONS: Array<{ value: string; label: string; tooltip: string }> = [
+  { value: "off", label: "Off", tooltip: "Do not share the clipboard with other devices" },
+  { value: "manual", label: "Manual", tooltip: "Send on demand; apply incoming clipboard" },
+  { value: "push", label: "Send", tooltip: "Auto-send local copies; ignore incoming clipboard" },
+  { value: "sync", label: "Two-way", tooltip: "Auto-send local copies and apply incoming clipboard" }
+];
+
 function resolveTheme(preference: ThemePreference) {
   if (preference === "system") {
     return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
@@ -125,6 +132,7 @@ type AppSettings = {
   shakeSensitivity: number;
   deviceName: string;
   downloadDirectory: string | null;
+  clipboardMode: string;
 };
 
 type PlatformCapabilities = {
@@ -192,6 +200,7 @@ function App() {
     const stored = localStorage.getItem(THEME_STORAGE_KEY);
     return stored === "light" || stored === "dark" ? stored : "system";
   });
+  const [clipboardMode, setClipboardMode] = useState("off");
   const [shelfSelectionMode, setShelfSelectionMode] = useState(false);
   const [shelfSelectedIds, setShelfSelectedIds] = useState<number[]>([]);
   const [appVersion, setAppVersion] = useState("");
@@ -420,6 +429,7 @@ function App() {
         setShakeSensitivityState(appSettings.shakeSensitivity);
         setDeviceName(appSettings.deviceName);
         setDownloadDirectory(appSettings.downloadDirectory ?? effectiveDownloadDirectory);
+        setClipboardMode(appSettings.clipboardMode ?? "off");
         setPlatformCapabilities(capabilities);
         setAccessibilityAllowed(accessibility);
       } catch (error) {
@@ -868,6 +878,29 @@ function App() {
       // Ignore storage failures; the choice still applies for this session.
     }
     void emit("theme-changed", preference);
+  }
+
+  async function updateClipboardMode(mode: string) {
+    try {
+      const settings = await invoke<AppSettings>("set_clipboard_mode", { mode });
+      setClipboardMode(settings.clipboardMode);
+      setStatus(
+        settings.clipboardMode === "off"
+          ? "Clipboard sync disabled"
+          : `Clipboard sync set to ${settings.clipboardMode}`
+      );
+    } catch (error) {
+      setStatus(toErrorMessage(error));
+    }
+  }
+
+  async function sendClipboardNow() {
+    try {
+      await invoke("send_clipboard");
+      setStatus("Clipboard sent to linked devices");
+    } catch (error) {
+      setStatus(toErrorMessage(error));
+    }
   }
 
   async function checkForUpdates(manual: boolean) {
@@ -1962,6 +1995,47 @@ function App() {
                   onClick={() => void updateDeviceName()}
                 >
                   Save
+                </button>
+              </div>
+            </div>
+
+            <div className="setting-row download-location-row">
+              <div className="setting-copy">
+                <strong>Clipboard sync</strong>
+                <span>
+                  {clipboardMode === "off"
+                    ? "The clipboard is not shared with other devices."
+                    : clipboardMode === "manual"
+                      ? "Send on demand with the button; incoming clipboard is applied here."
+                      : clipboardMode === "push"
+                        ? "Copying sends to linked devices; incoming clipboard is ignored."
+                        : "Copying sends to linked devices, and incoming clipboard is applied here."}
+                </span>
+              </div>
+              <div className="download-location-control">
+                <div className="theme-control" role="group" aria-label="Clipboard sync mode">
+                  {CLIPBOARD_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={`theme-option${clipboardMode === option.value ? " is-active" : ""}`}
+                      aria-pressed={clipboardMode === option.value}
+                      data-tooltip={option.tooltip}
+                      disabled={!settingsReady || isBusy}
+                      onClick={() => void updateClipboardMode(option.value)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  data-tooltip="Send the current clipboard to linked devices now"
+                  onClick={() => void sendClipboardNow()}
+                >
+                  <ClipboardPaste size={16} />
+                  Send now
                 </button>
               </div>
             </div>
