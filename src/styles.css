@@ -311,20 +311,31 @@ kbd {
   background: #f5e5e2;
 }
 
-.shelf-item-badge {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  padding: 1px 5px;
+.shelf-type-icon {
+  position: relative;
+}
+
+.shelf-type-tag {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  padding: 0 3px;
   border-radius: 4px;
-  color: var(--type-color, #52645e);
-  background: var(--type-bg, #eef1ef);
+  color: #ffffff;
+  background: var(--type-color, #52645e);
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.06em;
-  line-height: 1.5;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
   text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.shake-shelf-item-icon .shelf-type-tag {
+  right: -3px;
+  bottom: -3px;
+  padding: 0 2px;
+  font-size: 7px;
 }
 
 .tone-folder { --type-color: #1f6faa; --type-bg: #eaf3f8; }
@@ -344,7 +355,7 @@ kbd {
 .tone-app { --type-color: #52645e; --type-bg: #eef1ef; }
 
 @media (max-width: 220px) {
-  .shake-shelf-item .shelf-item-badge {
+  .shake-shelf-item .shelf-type-tag {
     display: none;
   }
 
@@ -879,14 +890,6 @@ h1 {
   min-width: 0;
 }
 
-.item-copy .shelf-item-badge {
-  display: inline-flex;
-  margin-top: 0;
-  color: var(--type-color, #52645e);
-  background: var(--type-bg, #eef1ef);
-  font-size: 10px;
-}
-
 .item-meta {
   gap: 10px;
   color: #52645e;
@@ -1277,7 +1280,7 @@ h1 {
 .app-tooltip::after {
   content: "";
   position: absolute;
-  left: 50%;
+  left: var(--arrow-x, 50%);
   top: -3px;
   width: 8px;
   height: 8px;

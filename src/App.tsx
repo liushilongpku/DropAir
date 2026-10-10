@@ -36,7 +36,7 @@ import {
   X,
   type LucideIcon
 } from "lucide-react";
-import { DragEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { DragEvent, MouseEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 const isShelfWindow = new URLSearchParams(window.location.search).has("shelf");
 
@@ -63,6 +63,7 @@ type TooltipState = {
   text: string;
   x: number;
   y: number;
+  anchorX: number;
   placement: "above" | "below";
 } | null;
 
@@ -233,6 +234,7 @@ function App() {
     const centerX = rect.left + rect.width / 2;
     setTooltip({
       text,
+      anchorX: centerX,
       x: Math.min(Math.max(centerX, halfWidth), window.innerWidth - halfWidth),
       y: placement === "below" ? rect.bottom + 8 : rect.top - 8,
       placement
@@ -1118,7 +1120,6 @@ function App() {
                 )}
                 <ShelfItemIcon item={item} size={16} className="shake-shelf-item-icon" />
                 <span className="shake-shelf-item-name">{item.name}</span>
-                <ShelfItemBadge item={item} />
                 {item.kind !== "text" && (
                   <>
                     <button
@@ -1236,7 +1237,7 @@ function App() {
           </div>
           <div>
             <strong>DropAir</strong>
-            <span>{appVersion || "0.2.1"}</span>
+            <span>{appVersion || "0.2.2"}</span>
           </div>
         </div>
 
@@ -1421,7 +1422,6 @@ function App() {
                   <div className="item-copy">
                     <div className="item-title">
                       <strong>{item.name}</strong>
-                      <ShelfItemBadge item={item} />
                     </div>
                     <span>{item.content ?? item.path}</span>
                   </div>
@@ -1901,9 +1901,9 @@ function App() {
                 <strong>Updates</strong>
                 <span>
                   {updateVersion
-                    ? `Version ${updateVersion} is available. Installed version ${appVersion || "0.2.1"}.`
+                    ? `Version ${updateVersion} is available. Installed version ${appVersion || "0.2.2"}.`
                     : "DropAir checks for updates on launch. Installed version " +
-                      `${appVersion || "0.2.1"}.`}
+                      `${appVersion || "0.2.2"}.`}
                 </span>
               </div>
               <div className="download-location-control">
@@ -2077,7 +2077,7 @@ function describeShelfItem(item: ShelfItem): FileTypePresentation {
   }
 
   if (item.kind === "text") {
-    return { Icon: FileText, tone: "document", badge: "TEXT" };
+    return { Icon: FileText, tone: "document", badge: "TXT" };
   }
 
   const extension = fileExtension(item.name);
@@ -2100,24 +2100,30 @@ function ShelfItemIcon({
   size: number;
   className: string;
 }) {
-  const { Icon, tone } = describeShelfItem(item);
+  const { Icon, tone, badge } = describeShelfItem(item);
   return (
-    <span className={`${className} tone-${tone}`} aria-hidden="true">
+    <span className={`${className} shelf-type-icon tone-${tone}`} aria-hidden="true">
       <Icon size={size} />
+      {badge && <span className="shelf-type-tag">{badge}</span>}
     </span>
   );
 }
 
-function ShelfItemBadge({ item }: { item: ShelfItem }) {
-  const { tone, badge } = describeShelfItem(item);
-  if (!badge) return null;
-  return <span className={`shelf-item-badge tone-${tone}`}>{badge}</span>;
-}
-
 function TooltipBubble({ tooltip }: { tooltip: TooltipState }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element || !tooltip) return;
+    const rect = element.getBoundingClientRect();
+    const arrowX = Math.min(Math.max(tooltip.anchorX - rect.left, 10), Math.max(10, rect.width - 10));
+    element.style.setProperty("--arrow-x", `${arrowX}px`);
+  }, [tooltip]);
+
   if (!tooltip) return null;
   return (
     <div
+      ref={ref}
       className={`app-tooltip${tooltip.placement === "above" ? " is-above" : ""}`}
       style={{ left: tooltip.x, top: tooltip.y }}
       role="tooltip"
