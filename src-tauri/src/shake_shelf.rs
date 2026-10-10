@@ -13,7 +13,7 @@ use objc2::{
 };
 use objc2_app_kit::{
     NSApplication, NSBackingStoreType, NSDraggingContext, NSDraggingItem, NSDraggingSession,
-    NSDraggingSource, NSDragOperation, NSEvent, NSPanel,
+    NSDraggingSource, NSDragOperation, NSEvent, NSEventModifierFlags, NSEventType, NSPanel,
     NSPasteboard, NSPasteboardNameDrag, NSPasteboardTypeFileURL, NSPasteboardTypeString,
     NSStatusWindowLevel, NSView, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
 };
@@ -638,28 +638,47 @@ fn begin_file_drag_on_main_thread(path: &str) -> Result<(), String> {
         .contentView()
         .ok_or_else(|| "shake shelf panel has no content view".to_string())?;
     let file_url = NSURL::fileURLWithPath_isDirectory(&NSString::from_str(path), false);
-    let event = NSApplication::sharedApplication(marker)
-        .currentEvent()
-        .ok_or_else(|| "no active mouse event was found".to_string())?;
-    let current_position = event.locationInWindow();
-    let source_point = view.convertPoint_fromView(current_position, None);
-    let source_rect = NSRect::new(source_point, NSSize::new(32.0, 32.0));
+
+    // Use the live pointer location instead of the current event. The IPC round
+    // trip from the webview means `NSApplication::currentEvent` is frequently nil
+    // or already stale by the time this runs, which made drag-out unreliable.
+    let pointer_window_position = panel.mouseLocationOutsideOfEventStream();
+    let pointer_view_position = view.convertPoint_fromView(pointer_window_position, None);
+    let preview_rect = NSRect::new(pointer_view_position, NSSize::new(1.0, 1.0));
 
     let dragging_item = NSDraggingItem::initWithPasteboardWriter(
         NSDraggingItem::alloc(),
         &ProtocolObject::from_retained(file_url),
     );
-    unsafe { dragging_item.setDraggingFrame_contents(source_rect, None) };
+    unsafe { dragging_item.setDraggingFrame_contents(preview_rect, None) };
     let dragging_items = NSMutableArray::new();
     dragging_items.addObject(&*dragging_item);
+
+    // `beginDraggingSession` needs a mouse event, so synthesize a left-drag at
+    // the pointer position. Reuse the real event timestamp when one is available.
+    let timestamp = NSApplication::sharedApplication(marker)
+        .currentEvent()
+        .map(|event| event.timestamp())
+        .unwrap_or(0.0);
+    let drag_event =
+        NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
+            NSEventType::LeftMouseDragged,
+            pointer_window_position,
+            NSEventModifierFlags::empty(),
+            timestamp,
+            panel.windowNumber(),
+            None,
+            0,
+            1,
+            1.0,
+        )
+        .ok_or_else(|| "failed to synthesize the drag event".to_string())?;
+
     let drag_source = DropAirDragSource::new(marker);
     let drag_source = ProtocolObject::<dyn NSDraggingSource>::from_retained(drag_source);
 
-    let _session = view.beginDraggingSessionWithItems_event_source(
-        &dragging_items,
-        &event,
-        &drag_source,
-    );
+    let _session =
+        view.beginDraggingSessionWithItems_event_source(&dragging_items, &drag_event, &drag_source);
     Ok(())
 }
 
