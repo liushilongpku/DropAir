@@ -28,6 +28,7 @@ const PEER_TIMEOUT: Duration = Duration::from_secs(20);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const SOCKET_TIMEOUT: Duration = Duration::from_secs(30);
 const DISCOVERY_PREFIX: &str = "DROP_AIR_DISCOVERY_V1|";
+const DISCOVERY_REPLY_PREFIX: &str = "DROP_AIR_DISCOVERY_REPLY_V1|";
 const TRANSFER_PREFIX: &str = "DROP_AIR_TRANSFER_V1|";
 const TRANSFER_ACK_PREFIX: &str = "DROP_AIR_ACK_V1|";
 const MAX_TRANSFER_ITEM_SIZE: u64 = 4 * 1024 * 1024 * 1024;
@@ -133,11 +134,23 @@ pub fn setup(app: &AppHandle) -> Result<(), String> {
     }));
     match bind_transfer_sockets() {
         Ok((discovery_socket, transfer_listener)) => {
+            let broadcast_socket = match discovery_socket.try_clone() {
+                Ok(socket) => Some(socket),
+                Err(error) => {
+                    emit_transfer_error(
+                        app,
+                        &format!("Discovery broadcast socket could not be cloned: {error}"),
+                    );
+                    None
+                }
+            };
             let discovery_app = app.clone();
             thread::spawn(move || listen_for_discovery(discovery_app, discovery_socket));
 
-            let broadcast_app = app.clone();
-            thread::spawn(move || broadcast_discovery(broadcast_app));
+            if let Some(broadcast_socket) = broadcast_socket {
+                let broadcast_app = app.clone();
+                thread::spawn(move || broadcast_discovery(broadcast_app, broadcast_socket));
+            }
 
             let transfer_app = app.clone();
             thread::spawn(move || listen_for_transfers(transfer_app, transfer_listener));
@@ -150,30 +163,53 @@ pub fn setup(app: &AppHandle) -> Result<(), String> {
 }
 
 fn bind_transfer_sockets() -> Result<(UdpSocket, TcpListener), String> {
+    let (discovery_socket, discovery_port) = bind_discovery_socket()?;
+    let (transfer_listener, transfer_port) = bind_transfer_listener()?;
+    ACTIVE_DISCOVERY_PORT.store(discovery_port, Ordering::Relaxed);
+    ACTIVE_TRANSFER_PORT.store(transfer_port, Ordering::Relaxed);
+    Ok((discovery_socket, transfer_listener))
+}
+
+fn bind_discovery_socket() -> Result<(UdpSocket, u16), String> {
     let mut errors = Vec::new();
-    for (discovery_port, transfer_port) in PORT_PROFILES {
-        let discovery_socket = match UdpSocket::bind(("0.0.0.0", discovery_port)) {
-            Ok(socket) => socket,
-            Err(error) => {
-                errors.push(format!("UDP {discovery_port}: {error}"));
-                continue;
-            }
-        };
-        let transfer_listener = match TcpListener::bind(("0.0.0.0", transfer_port)) {
-            Ok(listener) => listener,
-            Err(error) => {
-                errors.push(format!("TCP {transfer_port}: {error}"));
-                continue;
-            }
-        };
-        ACTIVE_DISCOVERY_PORT.store(discovery_port, Ordering::Relaxed);
-        ACTIVE_TRANSFER_PORT.store(transfer_port, Ordering::Relaxed);
-        return Ok((discovery_socket, transfer_listener));
+    for (discovery_port, _) in PORT_PROFILES {
+        match UdpSocket::bind(("0.0.0.0", discovery_port)) {
+            Ok(socket) => return Ok((socket, discovery_port)),
+            Err(error) => errors.push(format!("UDP {discovery_port}: {error}")),
+        }
     }
-    Err(format!(
-        "No DropAir discovery/transfer port pair is available: {}",
-        errors.join("; ")
-    ))
+    let socket = UdpSocket::bind(("0.0.0.0", 0)).map_err(|error| {
+        format!(
+            "No DropAir discovery port is available: {}; temporary UDP port failed: {error}",
+            errors.join("; ")
+        )
+    })?;
+    let port = socket
+        .local_addr()
+        .map_err(|error| format!("could not determine temporary UDP port: {error}"))?
+        .port();
+    Ok((socket, port))
+}
+
+fn bind_transfer_listener() -> Result<(TcpListener, u16), String> {
+    let mut errors = Vec::new();
+    for (_, transfer_port) in PORT_PROFILES {
+        match TcpListener::bind(("0.0.0.0", transfer_port)) {
+            Ok(listener) => return Ok((listener, transfer_port)),
+            Err(error) => errors.push(format!("TCP {transfer_port}: {error}")),
+        }
+    }
+    let listener = TcpListener::bind(("0.0.0.0", 0)).map_err(|error| {
+        format!(
+            "No DropAir transfer port is available: {}; temporary TCP port failed: {error}",
+            errors.join("; ")
+        )
+    })?;
+    let port = listener
+        .local_addr()
+        .map_err(|error| format!("could not determine temporary TCP port: {error}"))?
+        .port();
+    Ok((listener, port))
 }
 
 fn active_discovery_port() -> u16 {
@@ -280,7 +316,7 @@ fn listen_for_discovery(app: AppHandle, socket: UdpSocket) {
                 let Ok(message) = std::str::from_utf8(&buffer[..size]) else {
                     continue;
                 };
-                handle_discovery_message(&app, message, source.ip().to_string());
+                handle_discovery_message(&app, message, source, &socket);
             }
             Err(error)
                 if matches!(
@@ -297,10 +333,15 @@ fn listen_for_discovery(app: AppHandle, socket: UdpSocket) {
     }
 }
 
-fn handle_discovery_message(app: &AppHandle, message: &str, address: String) {
-    let Some(payload) = message.strip_prefix(DISCOVERY_PREFIX) else {
+fn handle_discovery_message(app: &AppHandle, message: &str, source: SocketAddr, socket: &UdpSocket) {
+    let (is_reply, payload) = if let Some(payload) = message.strip_prefix(DISCOVERY_PREFIX) {
+        (false, payload)
+    } else if let Some(payload) = message.strip_prefix(DISCOVERY_REPLY_PREFIX) {
+        (true, payload)
+    } else {
         return;
     };
+    let address = source.ip().to_string();
     let mut parts = payload.splitn(4, '|');
     let (Some(id), Some(name), Some(port_text)) = (parts.next(), parts.next(), parts.next()) else {
         return;
@@ -308,9 +349,14 @@ fn handle_discovery_message(app: &AppHandle, message: &str, address: String) {
     let Ok(port) = port_text.trim().parse::<u16>() else {
         return;
     };
-    let (own_id, _) = device_identity(app);
+    let (own_id, own_name) = device_identity(app);
     if id == own_id {
         return;
+    }
+
+    if !is_reply {
+        let reply = format!("{DISCOVERY_REPLY_PREFIX}{own_id}|{own_name}|{}", active_transfer_port());
+        let _ = socket.send_to(reply.as_bytes(), source);
     }
 
     let state = app.state::<Mutex<PeersState>>();
@@ -390,11 +436,7 @@ fn prune_stale_peers(app: &AppHandle) {
     }
 }
 
-fn broadcast_discovery(app: AppHandle) {
-    let Ok(socket) = UdpSocket::bind(("0.0.0.0", 0)) else {
-        record_transfer_error(&app, "Discovery broadcast could not open a UDP socket");
-        return;
-    };
+fn broadcast_discovery(app: AppHandle, socket: UdpSocket) {
     let _ = socket.set_broadcast(true);
     loop {
         if let Err(error) = send_discovery_announcement(&app, &socket) {
@@ -1260,7 +1302,10 @@ pub fn transfer_self_check(app: tauri::AppHandle) -> TransferSelfCheck {
             label: "Discovery broadcast".to_string(),
             ok: diagnostics.discovery_broadcast_up,
             detail: if diagnostics.discovery_broadcast_up {
-                format!("UDP discovery announcements are being sent on port {}", diagnostics.discovery_port)
+                format!(
+                    "UDP announcements are sent to the candidate ports; this instance listens on {}",
+                    diagnostics.discovery_port
+                )
             } else {
                 "UDP discovery announcements could not be sent".to_string()
             },

@@ -98,6 +98,9 @@ files and text between devices:
   selects a free pair such as UDP `47657`/TCP `47658` or UDP `47659`/TCP `47660`.
   Both devices should run a current version so discovery announcements reach
   the selected pair.
+- If every fixed discovery port is occupied, an instance falls back to temporary
+  UDP and TCP ports. Updated peers reply directly to the announcement source,
+  so discovery still works when Windows and WSL share the same IP.
 - During the port transition, a peer advertising `47654` or `47656` is tried
   on both compatible ports so stale discovery records can recover automatically.
 - Received files are stored in the configurable **Download location** from
