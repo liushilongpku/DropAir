@@ -903,6 +903,16 @@ fn peer_endpoint(address: &str, port: u16) -> String {
     }
 }
 
+fn compatible_transfer_ports(port: u16) -> Vec<u16> {
+    let mut ports = vec![port];
+    if port == 47654 {
+        ports.push(47656);
+    } else if port == 47656 {
+        ports.push(47654);
+    }
+    ports
+}
+
 fn peer_endpoints(peer: &PeerInfo) -> Vec<String> {
     let mut addresses = Vec::with_capacity(peer.addresses.len() + 1);
     addresses.push(peer.address.clone());
@@ -911,9 +921,10 @@ fn peer_endpoints(peer: &PeerInfo) -> Vec<String> {
             addresses.push(address.clone());
         }
     }
+    let ports = compatible_transfer_ports(peer.port);
     addresses
         .into_iter()
-        .map(|address| peer_endpoint(&address, peer.port))
+        .flat_map(|address| ports.iter().map(move |port| peer_endpoint(&address, *port)))
         .collect()
 }
 
@@ -1274,5 +1285,12 @@ mod tests {
         assert!(DISCOVERY_PORTS.contains(&47653));
         assert!(DISCOVERY_PORTS.contains(&47655));
         assert!(DISCOVERY_PORTS.contains(&DISCOVERY_PORT));
+    }
+
+    #[test]
+    fn tries_the_other_default_transfer_port_for_stale_peer_records() {
+        assert_eq!(compatible_transfer_ports(47654), vec![47654, 47656]);
+        assert_eq!(compatible_transfer_ports(47656), vec![47656, 47654]);
+        assert_eq!(compatible_transfer_ports(49000), vec![49000]);
     }
 }

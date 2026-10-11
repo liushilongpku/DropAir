@@ -94,6 +94,8 @@ files and text between devices:
 - Transfer: Windows and macOS stream files and text over TCP port `47654`;
   Linux uses TCP port `47656` for the same reason. The active ports are shown
   by the Devices self-check and are included in automatic discovery messages.
+- During the port transition, a peer advertising `47654` or `47656` is tried
+  on both compatible ports so stale discovery records can recover automatically.
 - Received files are stored in the configurable **Download location** from
   Settings. The default is `Downloads/DropAir`; received text is restored as a
   text Shelf item.
