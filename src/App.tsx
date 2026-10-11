@@ -5,6 +5,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check as checkForAppUpdate, type Update } from "@tauri-apps/plugin-updater";
 import {
+  AlertCircle,
   CheckCircle2,
   ClipboardPaste,
   Download,
@@ -254,6 +255,29 @@ function App() {
   const shakeSupported = platformCapabilities?.shakeSupported ?? true;
   const isWindows = platformCapabilities?.platform === "windows";
   const accessibilityRequired = platformCapabilities?.accessibilityRequired ?? false;
+  const shelfStatusTone = useMemo(() => {
+    const message = status.toLowerCase();
+    if (
+      message.includes("failed") ||
+      message.includes("error") ||
+      message.includes("could not") ||
+      message.includes("unable") ||
+      message.includes("refused") ||
+      message.includes("retrying")
+    ) {
+      return "error";
+    }
+    if (
+      message.includes("starting") ||
+      message.includes("sending") ||
+      message.includes("checking") ||
+      message.includes("scanning") ||
+      message.includes("testing")
+    ) {
+      return "busy";
+    }
+    return "ready";
+  }, [status]);
 
   const totalSize = useMemo(
     () => items.reduce((sum, item) => sum + (item.size ?? 0), 0),
@@ -1350,8 +1374,23 @@ function App() {
           </div>
         )}
         <div className="shake-shelf-statusbar" aria-live="polite">
-          <span>{shelfSelectionMode ? `${shelfSelectedIds.length} selected` : `${items.length} queued`}</span>
-          <span>{status}</span>
+          <span className="shake-shelf-status-count">
+            {shelfSelectionMode ? `${shelfSelectedIds.length} selected` : `${items.length} queued`}
+          </span>
+          <span
+            className={`shake-shelf-status-message is-${shelfStatusTone}`}
+            data-tooltip={status}
+            aria-label={status}
+          >
+            {shelfStatusTone === "error" ? (
+              <AlertCircle size={13} aria-hidden="true" />
+            ) : shelfStatusTone === "busy" ? (
+              <Loader2 size={13} className="spin" aria-hidden="true" />
+            ) : (
+              <CheckCircle2 size={13} aria-hidden="true" />
+            )}
+            <span>{status}</span>
+          </span>
         </div>
         <TooltipBubble tooltip={tooltip} />
       </main>
@@ -1372,7 +1411,7 @@ function App() {
           </div>
           <div>
             <strong>DropAir</strong>
-            <span>{appVersion || "0.3.1"}</span>
+            <span>{appVersion || "0.3.2"}</span>
           </div>
         </div>
 
@@ -2169,9 +2208,9 @@ function App() {
                 <strong>Updates</strong>
                 <span>
                   {updateVersion
-                    ? `Version ${updateVersion} is available. Installed version ${appVersion || "0.3.1"}.`
+                    ? `Version ${updateVersion} is available. Installed version ${appVersion || "0.3.2"}.`
                     : "DropAir checks for updates on launch. Installed version " +
-                      `${appVersion || "0.3.1"}.`}
+                      `${appVersion || "0.3.2"}.`}
                 </span>
               </div>
               <div className="download-location-control">

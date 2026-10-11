@@ -168,6 +168,7 @@ kbd {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  min-width: 0;
   min-height: 25px;
   padding: 0 10px;
   border-top: 1px solid #dcebe2;
@@ -176,9 +177,41 @@ kbd {
   white-space: nowrap;
 }
 
-.shake-shelf-statusbar span:last-child {
+.shake-shelf-status-count {
+  flex: 0 0 auto;
+}
+
+.shake-shelf-status-message {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  cursor: help;
+}
+
+.shake-shelf-status-message > svg {
+  flex: 0 0 auto;
+}
+
+.shake-shelf-status-message > span {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shake-shelf-status-message.is-ready {
+  color: #4c8b73;
+}
+
+.shake-shelf-status-message.is-busy {
+  color: #8b7a42;
+}
+
+.shake-shelf-status-message.is-error {
+  color: #b45e53;
 }
 
 .shake-shelf-send {
@@ -1917,6 +1950,18 @@ h1 {
 [data-theme="dark"] .shake-shelf-statusbar {
   border-top-color: #26332e;
   color: #8b9c94;
+}
+
+[data-theme="dark"] .shake-shelf-status-message.is-ready {
+  color: #71c49f;
+}
+
+[data-theme="dark"] .shake-shelf-status-message.is-busy {
+  color: #d0b568;
+}
+
+[data-theme="dark"] .shake-shelf-status-message.is-error {
+  color: #ef9a8b;
 }
 
 [data-theme="dark"] .shake-shelf-close,

@@ -1,7 +1,7 @@
 use crate::clipboard_sync::{ClipboardPayload, MAX_CLIPBOARD_IMAGE_BYTES};
 use crate::settings::SettingsStore;
 use serde::{Deserialize, Serialize};
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -24,6 +24,7 @@ pub const TRANSFER_PORT: u16 = 47656;
 const DISCOVERY_PORTS: [u16; 2] = [47653, 47655];
 const DISCOVERY_INTERVAL: Duration = Duration::from_secs(3);
 const PEER_TIMEOUT: Duration = Duration::from_secs(20);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const SOCKET_TIMEOUT: Duration = Duration::from_secs(30);
 const DISCOVERY_PREFIX: &str = "DROP_AIR_DISCOVERY_V1|";
 const TRANSFER_PREFIX: &str = "DROP_AIR_TRANSFER_V1|";
@@ -732,7 +733,7 @@ fn send_clipboard_to_peer(
     address: &str,
     payload: &ClipboardPayload,
 ) -> Result<(), String> {
-    let mut stream = TcpStream::connect(address).map_err(|error| {
+    let mut stream = connect_to_peer(address).map_err(|error| {
         format!("Could not connect to {address}: {error}. On Windows, allow DropAir through the firewall for private networks.")
     })?;
     stream
@@ -785,7 +786,7 @@ fn send_clipboard_to_peer(
 }
 
 fn send_items_to_peer(app: &AppHandle, address: &str, item_ids: &[u64]) -> Result<usize, String> {
-    let mut stream = TcpStream::connect(address).map_err(|error| {
+    let mut stream = connect_to_peer(address).map_err(|error| {
         format!(
             "Could not connect to {address}: {error}. On Windows, allow DropAir through the firewall for private networks."
         )
@@ -901,6 +902,14 @@ fn peer_endpoint(address: &str, port: u16) -> String {
     } else {
         format!("{address}:{port}")
     }
+}
+
+fn connect_to_peer(address: &str) -> io::Result<TcpStream> {
+    let mut addresses = address.to_socket_addrs()?;
+    let endpoint = addresses.next().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::AddrNotAvailable, "no address resolved")
+    })?;
+    TcpStream::connect_timeout(&endpoint, CONNECT_TIMEOUT)
 }
 
 fn compatible_transfer_ports(port: u16) -> Vec<u16> {
