@@ -832,42 +832,80 @@ fn send_clipboard_to_peer(
     let (id, name) = device_identity(app);
     writeln!(stream, "{TRANSFER_PREFIX}{id}|{name}").map_err(|error| error.to_string())?;
 
-    let (kind, size, width, height, bytes): (&str, u64, Option<u32>, Option<u32>, &[u8]) = match payload
-    {
-        ClipboardPayload::Text(content) => (
-            "clipboard-text",
-            content.len() as u64,
-            None,
-            None,
-            content.as_bytes(),
-        ),
+    let expected_items = match payload {
+        ClipboardPayload::Text(content) => {
+            let header = TransferHeader {
+                kind: "clipboard-text".to_string(),
+                name: "clipboard".to_string(),
+                size: content.len() as u64,
+                width: None,
+                height: None,
+            };
+            let header_json = serde_json::to_string(&header).map_err(|error| error.to_string())?;
+            writeln!(stream, "{header_json}").map_err(|error| error.to_string())?;
+            stream
+                .write_all(content.as_bytes())
+                .map_err(|error| error.to_string())?;
+            1
+        }
         ClipboardPayload::Image {
             width,
             height,
             rgba,
-        } => (
-            "clipboard-image",
-            rgba.len() as u64,
-            Some(*width),
-            Some(*height),
-            rgba.as_slice(),
-        ),
+        } => {
+            let header = TransferHeader {
+                kind: "clipboard-image".to_string(),
+                name: "clipboard".to_string(),
+                size: rgba.len() as u64,
+                width: Some(*width),
+                height: Some(*height),
+            };
+            let header_json = serde_json::to_string(&header).map_err(|error| error.to_string())?;
+            writeln!(stream, "{header_json}").map_err(|error| error.to_string())?;
+            stream.write_all(rgba).map_err(|error| error.to_string())?;
+            1
+        }
+        ClipboardPayload::Files(files) => {
+            if files.is_empty() {
+                return Err("clipboard does not contain readable files".to_string());
+            }
+            for file in files {
+                let size = std::fs::metadata(&file.path)
+                    .map_err(|error| format!("could not read clipboard file {}: {error}", file.name))?
+                    .len();
+                if size > MAX_TRANSFER_ITEM_SIZE {
+                    return Err(format!("clipboard file is too large: {} bytes", size));
+                }
+                let header = TransferHeader {
+                    kind: "file".to_string(),
+                    name: file.name.clone(),
+                    size,
+                    width: None,
+                    height: None,
+                };
+                let header_json = serde_json::to_string(&header).map_err(|error| error.to_string())?;
+                writeln!(stream, "{header_json}").map_err(|error| error.to_string())?;
+                let mut source = std::fs::File::open(&file.path)
+                    .map_err(|error| format!("could not open clipboard file {}: {error}", file.name))?;
+                let mut buffer = vec![0u8; 64 * 1024];
+                loop {
+                    let read = source.read(&mut buffer).map_err(|error| error.to_string())?;
+                    if read == 0 {
+                        break;
+                    }
+                    stream
+                        .write_all(&buffer[..read])
+                        .map_err(|error| error.to_string())?;
+                }
+            }
+            files.len()
+        }
     };
-    let header = TransferHeader {
-        kind: kind.to_string(),
-        name: "clipboard".to_string(),
-        size,
-        width,
-        height,
-    };
-    let header_json = serde_json::to_string(&header).map_err(|error| error.to_string())?;
-    writeln!(stream, "{header_json}").map_err(|error| error.to_string())?;
-    stream.write_all(bytes).map_err(|error| error.to_string())?;
 
     stream
         .shutdown(Shutdown::Write)
         .map_err(|error| format!("could not finish transfer: {error}"))?;
-    wait_for_transfer_completion(&mut reader, 1)?;
+    wait_for_transfer_completion(&mut reader, expected_items)?;
     Ok(())
 }
 

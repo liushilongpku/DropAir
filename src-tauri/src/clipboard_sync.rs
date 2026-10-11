@@ -2,8 +2,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
+use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_clipboard_manager::ClipboardExt;
+
+#[cfg(target_os = "windows")]
+use std::ptr::null_mut;
 
 use crate::settings::SettingsStore;
 use crate::transfer;
@@ -47,6 +51,13 @@ impl ClipboardMode {
 pub enum ClipboardPayload {
     Text(String),
     Image { width: u32, height: u32, rgba: Vec<u8> },
+    Files(Vec<ClipboardFile>),
+}
+
+#[derive(Clone)]
+pub struct ClipboardFile {
+    pub path: PathBuf,
+    pub name: String,
 }
 
 /// Sequence of the clipboard change we last observed or wrote, so our own writes
@@ -121,12 +132,10 @@ pub fn watch(app: AppHandle) {
 
 /// Read the current clipboard payload.
 pub fn read_clipboard(app: &AppHandle) -> Option<ClipboardPayload> {
-    let clipboard = app.clipboard();
-    if let Ok(text) = clipboard.read_text() {
-        if !text.is_empty() {
-            return Some(ClipboardPayload::Text(text));
-        }
+    if let Some(files) = read_clipboard_files() {
+        return Some(ClipboardPayload::Files(files));
     }
+    let clipboard = app.clipboard();
     if let Ok(image) = clipboard.read_image() {
         let rgba = image.rgba().to_vec();
         let size = rgba.len() as u64;
@@ -138,7 +147,99 @@ pub fn read_clipboard(app: &AppHandle) -> Option<ClipboardPayload> {
             });
         }
     }
+    if let Ok(text) = clipboard.read_text() {
+        if !text.is_empty() {
+            return Some(ClipboardPayload::Text(text));
+        }
+    }
     None
+}
+
+fn read_clipboard_files() -> Option<Vec<ClipboardFile>> {
+    #[cfg(target_os = "windows")]
+    {
+        return read_windows_clipboard_files();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return read_macos_clipboard_files();
+    }
+    #[allow(unreachable_code)]
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn read_windows_clipboard_files() -> Option<Vec<ClipboardFile>> {
+    use windows_sys::Win32::System::DataExchange::{
+        CloseClipboard, GetClipboardData, OpenClipboard,
+    };
+    use windows_sys::Win32::UI::Shell::DragQueryFileW;
+
+    const CF_HDROP: u32 = 15;
+    let opened = unsafe { OpenClipboard(null_mut()) != 0 };
+    if !opened {
+        return None;
+    }
+
+    let files = unsafe {
+        let handle = GetClipboardData(CF_HDROP);
+        if handle.is_null() {
+            None
+        } else {
+            let count = DragQueryFileW(handle as _, u32::MAX, null_mut(), 0);
+            let mut files = Vec::new();
+            for index in 0..count {
+                let length = DragQueryFileW(handle as _, index, null_mut(), 0);
+                if length == 0 {
+                    continue;
+                }
+                let mut buffer = vec![0u16; length as usize + 1];
+                let written = DragQueryFileW(handle as _, index, buffer.as_mut_ptr(), buffer.len() as u32);
+                let path = PathBuf::from(String::from_utf16_lossy(&buffer[..written as usize]));
+                if path.is_file() {
+                    let name = path
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "clipboard-file".to_string());
+                    files.push(ClipboardFile { path, name });
+                }
+            }
+            Some(files)
+        }
+    };
+    unsafe { CloseClipboard(); }
+    files.filter(|files| !files.is_empty())
+}
+
+#[cfg(target_os = "macos")]
+fn read_macos_clipboard_files() -> Option<Vec<ClipboardFile>> {
+    use objc2_app_kit::{NSPasteboard, NSPasteboardTypeFileURL};
+    use objc2_foundation::{NSString, NSURL};
+
+    let value = unsafe {
+        NSPasteboard::generalPasteboard()
+            .stringForType(NSPasteboardTypeFileURL)
+            .map(|value| value.to_string())
+    }?;
+    let mut files = Vec::new();
+    for entry in value.lines().map(str::trim).filter(|entry| !entry.is_empty()) {
+        let path = if entry.starts_with("file:") {
+            unsafe { NSURL::URLWithString(&NSString::from_str(entry)) }.and_then(|url| url.to_file_path())
+        } else {
+            Some(PathBuf::from(entry))
+        };
+        let Some(path) = path else {
+            continue;
+        };
+        if path.is_file() {
+            let name = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "clipboard-file".to_string());
+            files.push(ClipboardFile { path, name });
+        }
+    }
+    (!files.is_empty()).then_some(files)
 }
 
 /// Apply a payload received from another device when the mode accepts it.
@@ -238,6 +339,7 @@ fn write_clipboard(app: &AppHandle, payload: &ClipboardPayload) -> Result<(), St
                 .write_image(&image)
                 .map_err(|error| error.to_string())
         }
+        ClipboardPayload::Files(_) => Err("file clipboard items are transferred as files".to_string()),
     }
 }
 
@@ -245,6 +347,8 @@ fn describe(payload: &ClipboardPayload) -> &'static str {
     match payload {
         ClipboardPayload::Text(_) => "text",
         ClipboardPayload::Image { .. } => "image",
+        ClipboardPayload::Files(files) if files.len() == 1 => "file",
+        ClipboardPayload::Files(_) => "files",
     }
 }
 

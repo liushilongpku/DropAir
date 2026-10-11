@@ -199,6 +199,12 @@ type ClipboardStatus = {
   at: number;
 };
 
+function isClipboardTransfer(event: Pick<TransferEvent, "peerId" | "message">) {
+  return (
+    event.peerId.startsWith("clipboard") || event.message.toLowerCase().includes("clipboard")
+  );
+}
+
 function App() {
   const [items, setItems] = useState<ShelfItem[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -396,7 +402,10 @@ function App() {
       const sent = localStorage.getItem("dropair.sent-records");
       const received = localStorage.getItem("dropair.received-records");
       if (sent) setSentRecords(JSON.parse(sent) as TransferRecord[]);
-      if (received) setReceivedRecords(JSON.parse(received) as TransferRecord[]);
+      if (received) {
+        const records = JSON.parse(received) as TransferRecord[];
+        setReceivedRecords(records.filter((record) => !isClipboardTransfer(record)));
+      }
     } catch {
       // Ignore malformed history and continue with an empty view.
     }
@@ -421,10 +430,7 @@ function App() {
     void listen<TransferEvent>("transfer-status", (event) => {
       const record = { ...event.payload, id: `${Date.now()}-${Math.random()}`, at: Date.now() };
       setStatus(event.payload.message);
-      if (
-        event.payload.peerId.startsWith("clipboard") ||
-        event.payload.message.toLowerCase().includes("clipboard")
-      ) {
+      if (isClipboardTransfer(event.payload)) {
         setClipboardStatus({
           state: event.payload.state,
           message: event.payload.message,
@@ -433,7 +439,7 @@ function App() {
       }
       if (event.payload.state === "sent") {
         setSentRecords((records) => [record, ...records].slice(0, 100));
-      } else if (event.payload.state === "received") {
+      } else if (event.payload.state === "received" && !isClipboardTransfer(event.payload)) {
         setReceivedRecords((records) => [record, ...records].slice(0, 100));
       }
     }).then(
@@ -1411,7 +1417,7 @@ function App() {
           </div>
           <div>
             <strong>DropAir</strong>
-            <span>{appVersion || "0.3.4"}</span>
+            <span>{appVersion || "0.3.5"}</span>
           </div>
         </div>
 
@@ -2208,9 +2214,9 @@ function App() {
                 <strong>Updates</strong>
                 <span>
                   {updateVersion
-                    ? `Version ${updateVersion} is available. Installed version ${appVersion || "0.3.4"}.`
+                    ? `Version ${updateVersion} is available. Installed version ${appVersion || "0.3.5"}.`
                     : "DropAir checks for updates on launch. Installed version " +
-                      `${appVersion || "0.3.4"}.`}
+                      `${appVersion || "0.3.5"}.`}
                 </span>
               </div>
               <div className="download-location-control">

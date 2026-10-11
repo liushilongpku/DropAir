@@ -171,12 +171,14 @@ LAN channel. Choose a mode in **Settings -> Clipboard sync**:
 - **Two-way** - copying is sent automatically and incoming clipboard content is
   applied to this machine.
 
-Both text and images are synchronized (images are capped at 24 MB). A
-**Send now** button is always available. The current clipboard is not sent when
-the app starts; only later changes are. Settings shows the latest clipboard
-sync state and linked-device count. **Test sync** sends a fixed test string to
-linked devices without reading or changing this device's clipboard; a device
-in Manual or Two-way mode applies that test string to its clipboard.
+Text and images are synchronized (images are capped at 24 MB). Files copied in
+Finder or Explorer are sent as file payloads, so the receiving device gets the
+file contents instead of only the filename. A **Send now** button is always
+available. The current clipboard is not sent when the app starts; only later
+changes are. Settings shows the latest clipboard sync state and linked-device
+count. **Test sync** sends a fixed test string to linked devices without
+reading or changing this device's clipboard; a device in Manual or Two-way mode
+applies that test string to its clipboard.
 
 > Clipboard content is sent over the same **unencrypted, unauthenticated**
 > channel as file transfers. Passwords, one-time codes, and anything else you
