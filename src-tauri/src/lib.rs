@@ -292,6 +292,13 @@ async fn send_clipboard(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn test_clipboard_sync(app: tauri::AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || clipboard_sync::test_now(&app))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 fn set_shake_enabled(
     enabled: bool,
     state: tauri::State<'_, Mutex<SettingsStore>>,
@@ -705,6 +712,7 @@ pub fn run() {
             set_device_name,
             set_clipboard_mode,
             send_clipboard,
+            test_clipboard_sync,
             set_shake_enabled,
             set_shake_sensitivity,
             accessibility_permission_status,

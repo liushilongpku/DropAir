@@ -183,12 +183,18 @@ type MainView = "shelf" | "devices" | "sent" | "received" | "settings";
 
 type TransferEvent = {
   peerId: string;
-  state: "sent" | "received" | "error";
+  state: "testing" | "sent" | "received" | "error";
   message: string;
 };
 
 type TransferRecord = TransferEvent & {
   id: string;
+  at: number;
+};
+
+type ClipboardStatus = {
+  state: "idle" | "testing" | "sent" | "received" | "error";
+  message: string;
   at: number;
 };
 
@@ -225,6 +231,11 @@ function App() {
   const [selectionMode, setSelectionMode] = useState(false);
   const [sentRecords, setSentRecords] = useState<TransferRecord[]>([]);
   const [receivedRecords, setReceivedRecords] = useState<TransferRecord[]>([]);
+  const [clipboardStatus, setClipboardStatus] = useState<ClipboardStatus>({
+    state: "idle",
+    message: "No clipboard sync activity yet.",
+    at: 0
+  });
   const [transferStatusInfo, setTransferStatusInfo] = useState<TransferStatusInfo | null>(null);
   const [transferSelfCheck, setTransferSelfCheck] = useState<TransferSelfCheck | null>(null);
   const [isCheckingTransfer, setIsCheckingTransfer] = useState(false);
@@ -237,6 +248,7 @@ function App() {
   const [shelfText, setShelfText] = useState("");
   const [shelfSendItemId, setShelfSendItemId] = useState<number | null>(null);
   const [testingPeerId, setTestingPeerId] = useState<string | null>(null);
+  const [isTestingClipboard, setIsTestingClipboard] = useState(false);
   const [platformCapabilities, setPlatformCapabilities] =
     useState<PlatformCapabilities | null>(null);
   const shakeSupported = platformCapabilities?.shakeSupported ?? true;
@@ -385,6 +397,16 @@ function App() {
     void listen<TransferEvent>("transfer-status", (event) => {
       const record = { ...event.payload, id: `${Date.now()}-${Math.random()}`, at: Date.now() };
       setStatus(event.payload.message);
+      if (
+        event.payload.peerId.startsWith("clipboard") ||
+        event.payload.message.toLowerCase().includes("clipboard")
+      ) {
+        setClipboardStatus({
+          state: event.payload.state,
+          message: event.payload.message,
+          at: Date.now()
+        });
+      }
       if (event.payload.state === "sent") {
         setSentRecords((records) => [record, ...records].slice(0, 100));
       } else if (event.payload.state === "received") {
@@ -900,6 +922,23 @@ function App() {
       setStatus("Clipboard sent to linked devices");
     } catch (error) {
       setStatus(toErrorMessage(error));
+    }
+  }
+
+  async function testClipboardSync() {
+    setIsTestingClipboard(true);
+    setClipboardStatus({
+      state: "testing",
+      message: "Sending a clipboard sync test to linked devices…",
+      at: Date.now()
+    });
+    try {
+      await invoke("test_clipboard_sync");
+      setStatus("Clipboard sync test passed");
+    } catch (error) {
+      setStatus(toErrorMessage(error));
+    } finally {
+      setIsTestingClipboard(false);
     }
   }
 
@@ -2012,6 +2051,43 @@ function App() {
                         ? "Copying sends to linked devices; incoming clipboard is ignored."
                         : "Copying sends to linked devices, and incoming clipboard is applied here."}
                 </span>
+                <div
+                  className={`clipboard-sync-status is-${clipboardStatus.state}`}
+                  role="status"
+                  aria-live="polite"
+                >
+                  <div className="clipboard-sync-status-icon" aria-hidden="true">
+                    {clipboardStatus.state === "testing" ? (
+                      <Loader2 className="spin" size={16} />
+                    ) : clipboardStatus.state === "error" ? (
+                      <X size={16} />
+                    ) : clipboardStatus.state === "idle" ? (
+                      <ClipboardPaste size={16} />
+                    ) : (
+                      <CheckCircle2 size={16} />
+                    )}
+                  </div>
+                  <div className="clipboard-sync-status-copy">
+                    <strong>
+                      {clipboardStatus.state === "idle"
+                        ? "Ready"
+                        : clipboardStatus.state === "testing"
+                          ? "Testing"
+                          : clipboardStatus.state === "error"
+                            ? "Sync error"
+                            : clipboardStatus.state === "received"
+                              ? "Received"
+                              : "Sent"}
+                    </strong>
+                    <span>{clipboardStatus.message}</span>
+                    <small className="clipboard-sync-status-peers">
+                      {linkedPeers.length} linked {linkedPeers.length === 1 ? "device" : "devices"}
+                    </small>
+                  </div>
+                  <span className="clipboard-sync-status-time">
+                    {clipboardStatus.at ? new Date(clipboardStatus.at).toLocaleTimeString() : "Waiting"}
+                  </span>
+                </div>
               </div>
               <div className="download-location-control">
                 <div className="theme-control" role="group" aria-label="Clipboard sync mode">
@@ -2037,6 +2113,16 @@ function App() {
                 >
                   <ClipboardPaste size={16} />
                   Send now
+                </button>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  data-tooltip="Send a test string to linked devices; accepting devices may replace their clipboard"
+                  disabled={!settingsReady || isBusy || isTestingClipboard || linkedPeers.length === 0}
+                  onClick={() => void testClipboardSync()}
+                >
+                  {isTestingClipboard ? <Loader2 className="spin" size={16} /> : <ShieldCheck size={16} />}
+                  Test sync
                 </button>
               </div>
             </div>

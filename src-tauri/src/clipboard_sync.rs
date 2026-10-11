@@ -185,6 +185,43 @@ pub fn send_now(app: &AppHandle) -> Result<(), String> {
     }
 }
 
+/// Send a known test value without reading or changing this device's clipboard.
+pub fn test_now(app: &AppHandle) -> Result<(), String> {
+    let payload = ClipboardPayload::Text("DropAir clipboard sync test".to_string());
+    let _ = app.emit(
+        "transfer-status",
+        serde_json::json!({
+            "peerId": "clipboard-test",
+            "state": "testing",
+            "message": "Sending a clipboard sync test to linked devices"
+        }),
+    );
+    match transfer::send_clipboard_payload(app, &payload) {
+        Ok(count) => {
+            let _ = app.emit(
+                "transfer-status",
+                serde_json::json!({
+                    "peerId": "clipboard-test",
+                    "state": "sent",
+                    "message": format!("Clipboard sync test reached {count} device(s)")
+                }),
+            );
+            Ok(())
+        }
+        Err(error) => {
+            let _ = app.emit(
+                "transfer-status",
+                serde_json::json!({
+                    "peerId": "clipboard-test",
+                    "state": "error",
+                    "message": format!("Clipboard sync test failed: {error}")
+                }),
+            );
+            Err(error)
+        }
+    }
+}
+
 fn write_clipboard(app: &AppHandle, payload: &ClipboardPayload) -> Result<(), String> {
     let clipboard = app.clipboard();
     match payload {

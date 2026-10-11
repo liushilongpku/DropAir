@@ -160,7 +160,10 @@ LAN channel. Choose a mode in **Settings -> Clipboard sync**:
 
 Both text and images are synchronized (images are capped at 24 MB). A
 **Send now** button is always available. The current clipboard is not sent when
-the app starts; only later changes are.
+the app starts; only later changes are. Settings shows the latest clipboard
+sync state and linked-device count. **Test sync** sends a fixed test string to
+linked devices without reading or changing this device's clipboard; a device
+in Manual or Two-way mode applies that test string to its clipboard.
 
 > Clipboard content is sent over the same **unencrypted, unauthenticated**
 > channel as file transfers. Passwords, one-time codes, and anything else you

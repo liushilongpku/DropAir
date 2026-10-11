@@ -675,6 +675,96 @@ kbd {
   color: #8a4b20;
 }
 
+.clipboard-sync-status {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid #dfe5df;
+  border-radius: 7px;
+  color: #52645e;
+  background: #fafbf9;
+  font-size: 11px;
+}
+
+.clipboard-sync-status-icon {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  color: #64736e;
+}
+
+.clipboard-sync-status-copy {
+  min-width: 0;
+}
+
+.clipboard-sync-status-copy strong,
+.clipboard-sync-status-copy span {
+  display: block;
+}
+
+.clipboard-sync-status-copy strong {
+  color: #29433c;
+  font-size: 11px;
+}
+
+.clipboard-sync-status-copy span {
+  margin-top: 2px;
+  overflow: hidden;
+  color: #64736e;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clipboard-sync-status-copy small {
+  display: block;
+  margin-top: 3px;
+  color: #7b8984;
+  font-size: 10px;
+}
+
+.clipboard-sync-status-time {
+  margin-top: 1px !important;
+  color: #7b8984 !important;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.clipboard-sync-status.is-testing {
+  border-color: #cbd8e7;
+  color: #35618b;
+  background: #f4f8fc;
+}
+
+.clipboard-sync-status.is-testing .clipboard-sync-status-icon {
+  color: #35618b;
+}
+
+.clipboard-sync-status.is-sent,
+.clipboard-sync-status.is-received {
+  border-color: #c5e2d2;
+  background: #f4fbf7;
+}
+
+.clipboard-sync-status.is-sent .clipboard-sync-status-icon,
+.clipboard-sync-status.is-received .clipboard-sync-status-icon {
+  color: #147566;
+}
+
+.clipboard-sync-status.is-error {
+  border-color: #e6c8c0;
+  color: #8a4b20;
+  background: #fff8f5;
+}
+
+.clipboard-sync-status.is-error .clipboard-sync-status-icon,
+.clipboard-sync-status.is-error .clipboard-sync-status-copy strong {
+  color: #a34d36;
+}
+
 .disclaimer-box {
   margin-top: 14px;
   padding: 12px 14px;
@@ -1589,6 +1679,64 @@ h1 {
 
 [data-theme="dark"] .transfer-status-box .is-warning {
   color: #e0b06a;
+}
+
+[data-theme="dark"] .clipboard-sync-status {
+  border-color: #2c3733;
+  color: #a9bab2;
+  background: #161c19;
+}
+
+[data-theme="dark"] .clipboard-sync-status-icon {
+  color: #94a59d;
+}
+
+[data-theme="dark"] .clipboard-sync-status-copy strong {
+  color: #d3e0da;
+}
+
+[data-theme="dark"] .clipboard-sync-status-copy span {
+  color: #94a59d;
+}
+
+[data-theme="dark"] .clipboard-sync-status-copy small {
+  color: #7d8f87;
+}
+
+[data-theme="dark"] .clipboard-sync-status-time {
+  color: #7d8f87 !important;
+}
+
+[data-theme="dark"] .clipboard-sync-status.is-testing {
+  border-color: #2e4e70;
+  color: #9bc3e4;
+  background: #172430;
+}
+
+[data-theme="dark"] .clipboard-sync-status.is-testing .clipboard-sync-status-icon {
+  color: #9bc3e4;
+}
+
+[data-theme="dark"] .clipboard-sync-status.is-sent,
+[data-theme="dark"] .clipboard-sync-status.is-received {
+  border-color: #2f5b48;
+  background: #17271f;
+}
+
+[data-theme="dark"] .clipboard-sync-status.is-sent .clipboard-sync-status-icon,
+[data-theme="dark"] .clipboard-sync-status.is-received .clipboard-sync-status-icon {
+  color: #5fd0ab;
+}
+
+[data-theme="dark"] .clipboard-sync-status.is-error {
+  border-color: #5a3027;
+  color: #e0a08d;
+  background: #2b1b18;
+}
+
+[data-theme="dark"] .clipboard-sync-status.is-error .clipboard-sync-status-icon,
+[data-theme="dark"] .clipboard-sync-status.is-error .clipboard-sync-status-copy strong {
+  color: #e88a7a;
 }
 
 [data-theme="dark"] .transfer-checks {
