@@ -285,11 +285,10 @@ fn set_clipboard_mode(
 }
 
 #[tauri::command]
-fn send_clipboard(app: tauri::AppHandle) -> Result<(), String> {
-    std::thread::spawn(move || {
-        let _ = clipboard_sync::send_now(&app);
-    });
-    Ok(())
+async fn send_clipboard(app: tauri::AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || clipboard_sync::send_now(&app))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]

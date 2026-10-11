@@ -68,6 +68,23 @@ struct TransferHeader {
     height: Option<u32>,
 }
 
+struct TransferErrorAck {
+    writer: Option<TcpStream>,
+    completed: bool,
+}
+
+impl Drop for TransferErrorAck {
+    fn drop(&mut self) {
+        if self.completed {
+            return;
+        }
+        if let Some(writer) = self.writer.as_mut() {
+            let _ = writeln!(writer, "{TRANSFER_ACK_PREFIX}error|transfer rejected");
+            let _ = writer.flush();
+        }
+    }
+}
+
 impl Default for TransferHeader {
     fn default() -> Self {
         Self {
@@ -388,6 +405,10 @@ fn handle_incoming_transfer(app: &AppHandle, stream: TcpStream) -> Result<(), St
     writer
         .set_write_timeout(Some(SOCKET_TIMEOUT))
         .map_err(|error| error.to_string())?;
+    let mut error_ack = TransferErrorAck {
+        writer: writer.try_clone().ok(),
+        completed: false,
+    };
     let mut reader = BufReader::new(stream);
     let mut handshake = String::new();
     reader.read_line(&mut handshake).map_err(|error| error.to_string())?;
@@ -503,6 +524,7 @@ fn handle_incoming_transfer(app: &AppHandle, stream: TcpStream) -> Result<(), St
     writeln!(writer, "{TRANSFER_ACK_PREFIX}complete|{received_items}")
         .map_err(|error| error.to_string())?;
     writer.flush().map_err(|error| error.to_string())?;
+    error_ack.completed = true;
     Ok(())
 }
 

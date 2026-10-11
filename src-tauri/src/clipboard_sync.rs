@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
@@ -61,6 +61,7 @@ pub fn current_mode(app: &AppHandle) -> ClipboardMode {
 }
 
 pub fn watch(app: AppHandle) {
+    let mut retry_after = Instant::now();
     if let Some(sequence) = clipboard_sequence() {
         LAST_SEQUENCE.store(sequence, Ordering::Relaxed);
     }
@@ -73,35 +74,46 @@ pub fn watch(app: AppHandle) {
         if sequence == LAST_SEQUENCE.load(Ordering::Relaxed) {
             continue;
         }
-        // Remember the change even when we are not sending, so enabling a mode
-        // does not replay history.
-        LAST_SEQUENCE.store(sequence, Ordering::Relaxed);
-        if !mode.auto_sends() || !transfer::has_linked_peers(&app) {
+        if Instant::now() < retry_after {
             continue;
         }
-        if let Some(payload) = read_clipboard(&app) {
-            let description = describe(&payload);
-            match transfer::send_clipboard_payload(&app, &payload) {
-                Ok(count) => {
-                    let _ = app.emit(
-                        "transfer-status",
-                        serde_json::json!({
-                            "peerId": "clipboard",
-                            "state": "sent",
-                            "message": format!("Sent clipboard {description} to {count} device(s)")
-                        }),
-                    );
-                }
-                Err(error) => {
-                    let _ = app.emit(
-                        "transfer-status",
-                        serde_json::json!({
-                            "peerId": "clipboard",
-                            "state": "error",
-                            "message": format!("Clipboard sync failed: {error}")
-                        }),
-                    );
-                }
+        // Remember the change even when we are not sending, so enabling a mode
+        // does not replay history.
+        if !mode.auto_sends() {
+            LAST_SEQUENCE.store(sequence, Ordering::Relaxed);
+            continue;
+        }
+        if !transfer::has_linked_peers(&app) {
+            continue;
+        }
+        let Some(payload) = read_clipboard(&app) else {
+            LAST_SEQUENCE.store(sequence, Ordering::Relaxed);
+            continue;
+        };
+        let description = describe(&payload);
+        match transfer::send_clipboard_payload(&app, &payload) {
+            Ok(count) => {
+                LAST_SEQUENCE.store(sequence, Ordering::Relaxed);
+                retry_after = Instant::now();
+                let _ = app.emit(
+                    "transfer-status",
+                    serde_json::json!({
+                        "peerId": "clipboard",
+                        "state": "sent",
+                        "message": format!("Sent clipboard {description} to {count} device(s)")
+                    }),
+                );
+            }
+            Err(error) => {
+                retry_after = Instant::now() + Duration::from_secs(5);
+                let _ = app.emit(
+                    "transfer-status",
+                    serde_json::json!({
+                        "peerId": "clipboard",
+                        "state": "error",
+                        "message": format!("Clipboard sync failed: {error}; retrying")
+                    }),
+                );
             }
         }
     }
