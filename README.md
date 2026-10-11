@@ -88,8 +88,12 @@ handling.
 DropAir discovers other instances on the same local network and can send Shelf
 files and text between devices:
 
-- Discovery: every instance broadcasts its identity over UDP port `47653`.
-- Transfer: files and text are streamed over TCP port `47654`.
+- Discovery: Windows and macOS use UDP port `47653`; Linux uses UDP port
+  `47655`. Announcements are sent to both ports so a Linux instance in WSL
+  mirrored mode can coexist with the Windows instance that shares its IP.
+- Transfer: Windows and macOS stream files and text over TCP port `47654`;
+  Linux uses TCP port `47656` for the same reason. The active ports are shown
+  by the Devices self-check and are included in automatic discovery messages.
 - Received files are stored in the configurable **Download location** from
   Settings. The default is `Downloads/DropAir`; received text is restored as a
   text Shelf item.

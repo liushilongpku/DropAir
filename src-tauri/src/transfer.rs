@@ -10,8 +10,18 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 
+/// Windows and macOS use the original ports. Linux uses a second pair so a
+/// Linux DropAir process in WSL mirrored mode can coexist with the Windows
+/// process that shares its network stack and IP address.
+#[cfg(not(target_os = "linux"))]
 pub const DISCOVERY_PORT: u16 = 47653;
+#[cfg(not(target_os = "linux"))]
 pub const TRANSFER_PORT: u16 = 47654;
+#[cfg(target_os = "linux")]
+pub const DISCOVERY_PORT: u16 = 47655;
+#[cfg(target_os = "linux")]
+pub const TRANSFER_PORT: u16 = 47656;
+const DISCOVERY_PORTS: [u16; 2] = [47653, 47655];
 const DISCOVERY_INTERVAL: Duration = Duration::from_secs(3);
 const PEER_TIMEOUT: Duration = Duration::from_secs(20);
 const SOCKET_TIMEOUT: Duration = Duration::from_secs(30);
@@ -263,8 +273,9 @@ fn handle_discovery_message(app: &AppHandle, message: &str, address: String) {
     };
     let changed = if let Some(existing) = state.peers.iter_mut().find(|existing| {
         existing.id == id
-            || existing.address == address
-            || existing.addresses.iter().any(|candidate| candidate == &address)
+            || (existing.port == port
+                && (existing.address == address
+                    || existing.addresses.iter().any(|candidate| candidate == &address)))
     }) {
         let mut structural_change = false;
         if existing.addresses.is_empty() {
@@ -345,12 +356,14 @@ fn send_discovery_announcement(app: &AppHandle, socket: &UdpSocket) -> Result<()
     DISCOVERY_BROADCAST_UP.store(false, Ordering::Relaxed);
     let (id, name) = device_identity(app);
     let message = format!("{DISCOVERY_PREFIX}{id}|{name}|{TRANSFER_PORT}");
-    socket
-        .send_to(message.as_bytes(), ("255.255.255.255", DISCOVERY_PORT))
-        .map_err(|error| error.to_string())?;
-    socket
-        .send_to(message.as_bytes(), ("127.0.0.1", DISCOVERY_PORT))
-        .map_err(|error| error.to_string())?;
+    for discovery_port in DISCOVERY_PORTS {
+        socket
+            .send_to(message.as_bytes(), ("255.255.255.255", discovery_port))
+            .map_err(|error| error.to_string())?;
+        socket
+            .send_to(message.as_bytes(), ("127.0.0.1", discovery_port))
+            .map_err(|error| error.to_string())?;
+    }
     if let Ok(interfaces) = if_addrs::get_if_addrs() {
         for interface in interfaces {
             let if_addrs::IfAddr::V4(address) = interface.addr else {
@@ -358,7 +371,9 @@ fn send_discovery_announcement(app: &AppHandle, socket: &UdpSocket) -> Result<()
             };
             let broadcast = directed_broadcast(address.ip, address.netmask);
             if broadcast != Ipv4Addr::new(255, 255, 255, 255) {
-                let _ = socket.send_to(message.as_bytes(), (broadcast, DISCOVERY_PORT));
+                for discovery_port in DISCOVERY_PORTS {
+                    let _ = socket.send_to(message.as_bytes(), (broadcast, discovery_port));
+                }
             }
         }
     }
@@ -1252,5 +1267,12 @@ mod tests {
         assert_eq!(normalize_peer_address("[fe80::1]"), Ok("fe80::1".to_string()));
         assert!(normalize_peer_address("192.168.1.20/share").is_err());
         assert!(normalize_peer_address(" ").is_err());
+    }
+
+    #[test]
+    fn advertises_both_discovery_ports_for_mirrored_networks() {
+        assert!(DISCOVERY_PORTS.contains(&47653));
+        assert!(DISCOVERY_PORTS.contains(&47655));
+        assert!(DISCOVERY_PORTS.contains(&DISCOVERY_PORT));
     }
 }
