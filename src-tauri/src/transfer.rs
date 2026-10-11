@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -21,7 +21,8 @@ pub const TRANSFER_PORT: u16 = 47654;
 pub const DISCOVERY_PORT: u16 = 47655;
 #[cfg(target_os = "linux")]
 pub const TRANSFER_PORT: u16 = 47656;
-const DISCOVERY_PORTS: [u16; 2] = [47653, 47655];
+const DISCOVERY_PORTS: [u16; 4] = [47653, 47655, 47657, 47659];
+const TRANSFER_PORT_CANDIDATES: [u16; 4] = [47654, 47656, 47658, 47660];
 const DISCOVERY_INTERVAL: Duration = Duration::from_secs(3);
 const PEER_TIMEOUT: Duration = Duration::from_secs(20);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
@@ -65,9 +66,26 @@ pub struct PeersState {
     last_error: Option<String>,
 }
 
+#[cfg(not(target_os = "linux"))]
+const PORT_PROFILES: [(u16, u16); 4] = [
+    (47653, 47654),
+    (47657, 47658),
+    (47655, 47656),
+    (47659, 47660),
+];
+#[cfg(target_os = "linux")]
+const PORT_PROFILES: [(u16, u16); 4] = [
+    (47655, 47656),
+    (47657, 47658),
+    (47653, 47654),
+    (47659, 47660),
+];
+
 static UDP_LISTENER_UP: AtomicBool = AtomicBool::new(false);
 static DISCOVERY_BROADCAST_UP: AtomicBool = AtomicBool::new(false);
 static TCP_LISTENER_UP: AtomicBool = AtomicBool::new(false);
+static ACTIVE_DISCOVERY_PORT: AtomicU16 = AtomicU16::new(DISCOVERY_PORT);
+static ACTIVE_TRANSFER_PORT: AtomicU16 = AtomicU16::new(TRANSFER_PORT);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -113,15 +131,57 @@ pub fn setup(app: &AppHandle) -> Result<(), String> {
         peers: load_saved_peers(app),
         last_error: None,
     }));
-    let discovery_app = app.clone();
-    thread::spawn(move || listen_for_discovery(discovery_app));
+    match bind_transfer_sockets() {
+        Ok((discovery_socket, transfer_listener)) => {
+            let discovery_app = app.clone();
+            thread::spawn(move || listen_for_discovery(discovery_app, discovery_socket));
 
-    let broadcast_app = app.clone();
-    thread::spawn(move || broadcast_discovery(broadcast_app));
+            let broadcast_app = app.clone();
+            thread::spawn(move || broadcast_discovery(broadcast_app));
 
-    let transfer_app = app.clone();
-    thread::spawn(move || listen_for_transfers(transfer_app));
+            let transfer_app = app.clone();
+            thread::spawn(move || listen_for_transfers(transfer_app, transfer_listener));
+        }
+        Err(error) => {
+            emit_transfer_error(app, &error);
+        }
+    }
     Ok(())
+}
+
+fn bind_transfer_sockets() -> Result<(UdpSocket, TcpListener), String> {
+    let mut errors = Vec::new();
+    for (discovery_port, transfer_port) in PORT_PROFILES {
+        let discovery_socket = match UdpSocket::bind(("0.0.0.0", discovery_port)) {
+            Ok(socket) => socket,
+            Err(error) => {
+                errors.push(format!("UDP {discovery_port}: {error}"));
+                continue;
+            }
+        };
+        let transfer_listener = match TcpListener::bind(("0.0.0.0", transfer_port)) {
+            Ok(listener) => listener,
+            Err(error) => {
+                errors.push(format!("TCP {transfer_port}: {error}"));
+                continue;
+            }
+        };
+        ACTIVE_DISCOVERY_PORT.store(discovery_port, Ordering::Relaxed);
+        ACTIVE_TRANSFER_PORT.store(transfer_port, Ordering::Relaxed);
+        return Ok((discovery_socket, transfer_listener));
+    }
+    Err(format!(
+        "No DropAir discovery/transfer port pair is available: {}",
+        errors.join("; ")
+    ))
+}
+
+fn active_discovery_port() -> u16 {
+    ACTIVE_DISCOVERY_PORT.load(Ordering::Relaxed)
+}
+
+fn active_transfer_port() -> u16 {
+    ACTIVE_TRANSFER_PORT.load(Ordering::Relaxed)
 }
 
 fn peers_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -209,16 +269,7 @@ fn now_millis() -> u64 {
         .unwrap_or(0)
 }
 
-fn listen_for_discovery(app: AppHandle) {
-    let Ok(socket) = UdpSocket::bind(("0.0.0.0", DISCOVERY_PORT)) else {
-        emit_transfer_error(
-            &app,
-            &format!(
-                "Discovery listener failed: UDP port {DISCOVERY_PORT} is unavailable"
-            ),
-        );
-        return;
-    };
+fn listen_for_discovery(app: AppHandle, socket: UdpSocket) {
     UDP_LISTENER_UP.store(true, Ordering::Relaxed);
     let _ = socket.set_broadcast(true);
     let _ = socket.set_read_timeout(Some(Duration::from_secs(1)));
@@ -356,7 +407,7 @@ fn broadcast_discovery(app: AppHandle) {
 fn send_discovery_announcement(app: &AppHandle, socket: &UdpSocket) -> Result<(), String> {
     DISCOVERY_BROADCAST_UP.store(false, Ordering::Relaxed);
     let (id, name) = device_identity(app);
-    let message = format!("{DISCOVERY_PREFIX}{id}|{name}|{TRANSFER_PORT}");
+    let message = format!("{DISCOVERY_PREFIX}{id}|{name}|{}", active_transfer_port());
     for discovery_port in DISCOVERY_PORTS {
         socket
             .send_to(message.as_bytes(), ("255.255.255.255", discovery_port))
@@ -386,14 +437,7 @@ fn directed_broadcast(ip: Ipv4Addr, netmask: Ipv4Addr) -> Ipv4Addr {
     Ipv4Addr::from(u32::from(ip) | !u32::from(netmask))
 }
 
-fn listen_for_transfers(app: AppHandle) {
-    let Ok(listener) = TcpListener::bind(("0.0.0.0", TRANSFER_PORT)) else {
-        emit_transfer_error(
-            &app,
-            &format!("Transfer listener failed: TCP port {TRANSFER_PORT} is unavailable"),
-        );
-        return;
-    };
+fn listen_for_transfers(app: AppHandle, listener: TcpListener) {
     TCP_LISTENER_UP.store(true, Ordering::Relaxed);
     for connection in listener.incoming() {
         match connection {
@@ -913,20 +957,15 @@ fn connect_to_peer(address: &str) -> io::Result<TcpStream> {
 }
 
 fn compatible_transfer_ports(port: u16) -> Vec<u16> {
-    let mut ports = Vec::new();
-    if port == 47654 || port == 47656 {
-        // Prefer the port used by this build. This repairs stale peer records
-        // from the mirrored Linux/Windows setup before trying the other pair.
-        ports.push(TRANSFER_PORT);
-        if port != TRANSFER_PORT {
-            ports.push(port);
-        }
-        let other_port = if TRANSFER_PORT == 47654 { 47656 } else { 47654 };
-        if !ports.contains(&other_port) {
-            ports.push(other_port);
-        }
-    } else {
-        ports.push(port);
+    let mut ports = vec![port];
+    if port == 47654 {
+        ports.push(47656);
+    } else if port == 47656 {
+        ports.push(47654);
+    }
+    let active_port = active_transfer_port();
+    if !ports.contains(&active_port) && TRANSFER_PORT_CANDIDATES.contains(&port) {
+        ports.push(active_port);
     }
     ports
 }
@@ -977,8 +1016,8 @@ pub fn transfer_status() -> TransferStatus {
         udp_listener_up: UDP_LISTENER_UP.load(Ordering::Relaxed),
         discovery_broadcast_up: DISCOVERY_BROADCAST_UP.load(Ordering::Relaxed),
         tcp_listener_up: TCP_LISTENER_UP.load(Ordering::Relaxed),
-        discovery_port: DISCOVERY_PORT,
-        transfer_port: TRANSFER_PORT,
+        discovery_port: active_discovery_port(),
+        transfer_port: active_transfer_port(),
     }
 }
 
@@ -1184,7 +1223,7 @@ fn transfer_diagnostics(app: &AppHandle) -> TransferDiagnostics {
         .unwrap_or((0, Some("Could not read transfer state".to_string())));
     let tcp_listener_up = TCP_LISTENER_UP.load(Ordering::Relaxed);
     let loopback_tcp_ok = tcp_listener_up
-        && format!("127.0.0.1:{TRANSFER_PORT}")
+        && format!("127.0.0.1:{}", active_transfer_port())
             .parse::<SocketAddr>()
             .ok()
             .and_then(|address| TcpStream::connect_timeout(&address, Duration::from_millis(500)).ok())
@@ -1193,8 +1232,8 @@ fn transfer_diagnostics(app: &AppHandle) -> TransferDiagnostics {
         udp_listener_up: UDP_LISTENER_UP.load(Ordering::Relaxed),
         discovery_broadcast_up: DISCOVERY_BROADCAST_UP.load(Ordering::Relaxed),
         tcp_listener_up,
-        discovery_port: DISCOVERY_PORT,
-        transfer_port: TRANSFER_PORT,
+        discovery_port: active_discovery_port(),
+        transfer_port: active_transfer_port(),
         peer_count,
         received_directory_writable: received_directory_writable(app),
         loopback_tcp_ok,
@@ -1306,11 +1345,9 @@ mod tests {
     }
 
     #[test]
-    fn prefers_this_builds_default_port_for_stale_peer_records() {
-        assert_eq!(compatible_transfer_ports(47654).first(), Some(&TRANSFER_PORT));
-        assert_eq!(compatible_transfer_ports(47656).first(), Some(&TRANSFER_PORT));
-        assert_eq!(compatible_transfer_ports(47654).len(), 2);
-        assert_eq!(compatible_transfer_ports(47656).len(), 2);
+    fn retries_the_other_default_port_for_stale_peer_records() {
+        assert_eq!(compatible_transfer_ports(47654), vec![47654, 47656]);
+        assert_eq!(compatible_transfer_ports(47656), vec![47656, 47654]);
         assert_eq!(compatible_transfer_ports(49000), vec![49000]);
     }
 }

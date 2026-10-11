@@ -1411,7 +1411,7 @@ function App() {
           </div>
           <div>
             <strong>DropAir</strong>
-            <span>{appVersion || "0.3.2"}</span>
+            <span>{appVersion || "0.3.3"}</span>
           </div>
         </div>
 
@@ -2208,9 +2208,9 @@ function App() {
                 <strong>Updates</strong>
                 <span>
                   {updateVersion
-                    ? `Version ${updateVersion} is available. Installed version ${appVersion || "0.3.2"}.`
+                    ? `Version ${updateVersion} is available. Installed version ${appVersion || "0.3.3"}.`
                     : "DropAir checks for updates on launch. Installed version " +
-                      `${appVersion || "0.3.2"}.`}
+                      `${appVersion || "0.3.3"}.`}
                 </span>
               </div>
               <div className="download-location-control">

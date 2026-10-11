@@ -94,6 +94,10 @@ files and text between devices:
 - Transfer: Windows and macOS stream files and text over TCP port `47654`;
   Linux uses TCP port `47656` for the same reason. The active ports are shown
   by the Devices self-check and are included in automatic discovery messages.
+- If a mirrored WSL process already occupies a port pair, DropAir automatically
+  selects a free pair such as UDP `47657`/TCP `47658` or UDP `47659`/TCP `47660`.
+  Both devices should run a current version so discovery announcements reach
+  the selected pair.
 - During the port transition, a peer advertising `47654` or `47656` is tried
   on both compatible ports so stale discovery records can recover automatically.
 - Received files are stored in the configurable **Download location** from
