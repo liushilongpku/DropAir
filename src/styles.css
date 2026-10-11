@@ -65,6 +65,8 @@ kbd {
 .shake-shelf {
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  width: 100%;
+  min-width: 0;
   height: 100vh;
   overflow: hidden;
   border: 1px solid #a9c8bb;
@@ -83,6 +85,7 @@ kbd {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  min-width: 0;
   min-height: 36px;
   padding: 0 12px;
   border-bottom: 1px solid #dcebe2;
@@ -100,6 +103,7 @@ kbd {
 .shake-shelf-actions {
   display: flex;
   align-items: center;
+  flex: 0 0 auto;
   gap: 8px;
 }
 
@@ -118,6 +122,7 @@ kbd {
 
 .shake-shelf-paste {
   display: flex;
+  min-width: 0;
   gap: 6px;
   padding: 8px 10px;
   border-bottom: 1px solid #dcebe2;
@@ -188,8 +193,12 @@ kbd {
   display: flex;
   flex: 1 1 auto;
   align-items: center;
+  min-width: 0;
+  overflow: hidden;
   cursor: move;
+  text-overflow: ellipsis;
   user-select: none;
+  white-space: nowrap;
 }
 
 .shake-shelf-close {
@@ -248,8 +257,9 @@ kbd {
   align-content: start;
   gap: 2px;
   min-height: 0;
+  min-width: 0;
   padding: 6px;
-  overflow-y: auto;
+  overflow: auto hidden;
 }
 
 .shake-shelf-item {
@@ -257,6 +267,8 @@ kbd {
   align-items: center;
   gap: 8px;
   min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
   padding: 4px 6px;
   border-radius: 6px;
   color: #315d52;
@@ -303,6 +315,14 @@ kbd {
   white-space: nowrap;
 }
 
+.shake-shelf-item-actions {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 2px;
+  min-width: max-content;
+}
+
 .shake-shelf-item-icon {
   display: inline-flex;
   flex: 0 0 auto;
@@ -317,6 +337,7 @@ kbd {
   justify-content: center;
   width: 24px;
   height: 24px;
+  flex: 0 0 24px;
   margin-left: auto;
   padding: 0;
   border: 0;

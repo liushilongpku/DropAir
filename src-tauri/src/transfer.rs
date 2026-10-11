@@ -904,11 +904,20 @@ fn peer_endpoint(address: &str, port: u16) -> String {
 }
 
 fn compatible_transfer_ports(port: u16) -> Vec<u16> {
-    let mut ports = vec![port];
-    if port == 47654 {
-        ports.push(47656);
-    } else if port == 47656 {
-        ports.push(47654);
+    let mut ports = Vec::new();
+    if port == 47654 || port == 47656 {
+        // Prefer the port used by this build. This repairs stale peer records
+        // from the mirrored Linux/Windows setup before trying the other pair.
+        ports.push(TRANSFER_PORT);
+        if port != TRANSFER_PORT {
+            ports.push(port);
+        }
+        let other_port = if TRANSFER_PORT == 47654 { 47656 } else { 47654 };
+        if !ports.contains(&other_port) {
+            ports.push(other_port);
+        }
+    } else {
+        ports.push(port);
     }
     ports
 }
@@ -1288,9 +1297,11 @@ mod tests {
     }
 
     #[test]
-    fn tries_the_other_default_transfer_port_for_stale_peer_records() {
-        assert_eq!(compatible_transfer_ports(47654), vec![47654, 47656]);
-        assert_eq!(compatible_transfer_ports(47656), vec![47656, 47654]);
+    fn prefers_this_builds_default_port_for_stale_peer_records() {
+        assert_eq!(compatible_transfer_ports(47654).first(), Some(&TRANSFER_PORT));
+        assert_eq!(compatible_transfer_ports(47656).first(), Some(&TRANSFER_PORT));
+        assert_eq!(compatible_transfer_ports(47654).len(), 2);
+        assert_eq!(compatible_transfer_ports(47656).len(), 2);
         assert_eq!(compatible_transfer_ports(49000), vec![49000]);
     }
 }

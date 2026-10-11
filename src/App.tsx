@@ -1253,96 +1253,98 @@ function App() {
                 )}
                 <ShelfItemIcon item={item} size={16} className="shake-shelf-item-icon" />
                 <span className="shake-shelf-item-name">{item.name}</span>
-                {item.kind !== "text" && (
-                  <>
-                    <button
-                      className="shake-shelf-icon"
-                      type="button"
-                      data-tooltip={`Open ${item.name}`}
-                      aria-label={`Open ${item.name}`}
-                      draggable={false}
+                <div className="shake-shelf-item-actions">
+                  {item.kind !== "text" && (
+                    <>
+                      <button
+                        className="shake-shelf-icon"
+                        type="button"
+                        data-tooltip={`Open ${item.name}`}
+                        aria-label={`Open ${item.name}`}
+                        draggable={false}
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onDragStart={(event) => event.stopPropagation()}
+                        onDoubleClick={(event) => event.stopPropagation()}
+                        onClick={() => void openShelfPath(item.path)}
+                      >
+                        <ExternalLink size={13} />
+                      </button>
+                      <button
+                        className="shake-shelf-icon"
+                        type="button"
+                        data-tooltip={isWindows ? "Show in Explorer" : "Show in Finder"}
+                        aria-label={isWindows ? "Show in Explorer" : "Show in Finder"}
+                        draggable={false}
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onDragStart={(event) => event.stopPropagation()}
+                        onDoubleClick={(event) => event.stopPropagation()}
+                        onClick={() => void revealShelfPath(item.path)}
+                      >
+                        <FolderOpen size={13} />
+                      </button>
+                    </>
+                  )}
+                  {shelfSendItemId === item.id && linkedPeers.length > 0 && (
+                    <select
+                      className="shake-shelf-item-peer-select"
+                      value=""
+                      autoFocus
+                      onChange={(event) => {
+                        const peerId = event.target.value;
+                        if (peerId) {
+                          setShelfSendItemId(null);
+                          void sendShelfItems(peerId, [item.id]);
+                        }
+                      }}
                       onMouseDown={(event) => event.stopPropagation()}
-                      onDragStart={(event) => event.stopPropagation()}
-                      onDoubleClick={(event) => event.stopPropagation()}
-                      onClick={() => void openShelfPath(item.path)}
+                      aria-label={`Choose a device for ${item.name}`}
                     >
-                      <ExternalLink size={13} />
-                    </button>
-                    <button
-                      className="shake-shelf-icon"
-                      type="button"
-                      data-tooltip={isWindows ? "Show in Explorer" : "Show in Finder"}
-                      aria-label={isWindows ? "Show in Explorer" : "Show in Finder"}
-                      draggable={false}
-                      onMouseDown={(event) => event.stopPropagation()}
-                      onDragStart={(event) => event.stopPropagation()}
-                      onDoubleClick={(event) => event.stopPropagation()}
-                      onClick={() => void revealShelfPath(item.path)}
-                    >
-                      <FolderOpen size={13} />
-                    </button>
-                  </>
-                )}
-                {shelfSendItemId === item.id && linkedPeers.length > 0 && (
-                  <select
-                    className="shake-shelf-item-peer-select"
-                    value=""
-                    autoFocus
-                    onChange={(event) => {
-                      const peerId = event.target.value;
-                      if (peerId) {
-                        setShelfSendItemId(null);
-                        void sendShelfItems(peerId, [item.id]);
+                      <option value="">Send to…</option>
+                      {linkedPeers.map((peer) => (
+                        <option value={peer.id} key={peer.id}>
+                          {peer.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <button
+                    className="shake-shelf-send"
+                    type="button"
+                    draggable={false}
+                    disabled={isBusy || item.kind === "directory"}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onDragStart={(event) => event.stopPropagation()}
+                    onDoubleClick={(event) => event.stopPropagation()}
+                    onClick={() => {
+                      if (linkedPeers.length === 0) {
+                        setStatus("Add a linked device first");
+                      } else {
+                        setShelfSendItemId((current) => (current === item.id ? null : item.id));
                       }
                     }}
-                    onMouseDown={(event) => event.stopPropagation()}
-                    aria-label={`Choose a device for ${item.name}`}
-                  >
-                    <option value="">Send to…</option>
-                    {linkedPeers.map((peer) => (
-                      <option value={peer.id} key={peer.id}>
-                        {peer.name}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                <button
-                  className="shake-shelf-send"
-                  type="button"
-                  draggable={false}
-                  disabled={isBusy || item.kind === "directory"}
-                  onMouseDown={(event) => event.stopPropagation()}
-                  onDragStart={(event) => event.stopPropagation()}
-                  onDoubleClick={(event) => event.stopPropagation()}
-                  onClick={() => {
-                    if (linkedPeers.length === 0) {
-                      setStatus("Add a linked device first");
-                    } else {
-                      setShelfSendItemId((current) => (current === item.id ? null : item.id));
+                    data-tooltip={
+                      linkedPeers.length === 0
+                        ? "Add a linked device first"
+                        : "Choose a linked device"
                     }
-                  }}
-                  data-tooltip={
-                    linkedPeers.length === 0
-                      ? "Add a linked device first"
-                      : "Choose a linked device"
-                  }
-                  aria-label={`Send ${item.name} to selected device`}
-                >
-                  <Send size={13} />
-                </button>
-                <button
-                  className="shake-shelf-remove"
-                  type="button"
-                  draggable={false}
-                  onMouseDown={(event) => event.stopPropagation()}
-                  onDragStart={(event) => event.stopPropagation()}
-                  onDoubleClick={(event) => event.stopPropagation()}
-                  onClick={() => void removeItem(item.id)}
-                  data-tooltip={`Remove ${item.name}`}
-                  aria-label={`Remove ${item.name}`}
-                >
-                  <X size={14} />
-                </button>
+                    aria-label={`Send ${item.name} to selected device`}
+                  >
+                    <Send size={13} />
+                  </button>
+                  <button
+                    className="shake-shelf-remove"
+                    type="button"
+                    draggable={false}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onDragStart={(event) => event.stopPropagation()}
+                    onDoubleClick={(event) => event.stopPropagation()}
+                    onClick={() => void removeItem(item.id)}
+                    data-tooltip={`Remove ${item.name}`}
+                    aria-label={`Remove ${item.name}`}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -1370,7 +1372,7 @@ function App() {
           </div>
           <div>
             <strong>DropAir</strong>
-            <span>{appVersion || "0.3.0"}</span>
+            <span>{appVersion || "0.3.1"}</span>
           </div>
         </div>
 
@@ -2167,9 +2169,9 @@ function App() {
                 <strong>Updates</strong>
                 <span>
                   {updateVersion
-                    ? `Version ${updateVersion} is available. Installed version ${appVersion || "0.3.0"}.`
+                    ? `Version ${updateVersion} is available. Installed version ${appVersion || "0.3.1"}.`
                     : "DropAir checks for updates on launch. Installed version " +
-                      `${appVersion || "0.3.0"}.`}
+                      `${appVersion || "0.3.1"}.`}
                 </span>
               </div>
               <div className="download-location-control">
